@@ -63,5 +63,11 @@ app.post('/publish', async (req, res) => {
   }
 });
 
+// --- TRUQUE PARA MANTER O RENDER 24/7 ---
+app.get('/', (req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('BBN Bridge esta online e rodando 24/7!\n');
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Ponte Nostr do BBN rodando na porta ${PORT}`));
