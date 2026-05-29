@@ -1,0 +1,2206 @@
+{
+  "name": "bbn",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "b2e30329-0770-4060-9d90-d89e7d529d14",
+      "name": "Every 30 Minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [
+        9568,
+        4416
+      ],
+      "typeVersion": 1.2
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "8d463a8b-52db-4065-80cd-b6f6ff5ed5ec",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              },
+              "leftValue": "={{ $json.output.should_alert }}",
+              "rightValue": {}
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      },
+      "id": "5eb109e3-5ec2-4b38-8fed-b48c61e9a80a",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "position": [
+        12208,
+        4416
+      ],
+      "typeVersion": 2.2
+    },
+    {
+      "parameters": {
+        "dataTableId": {
+          "__rl": true,
+          "value": "5whI1zLhZwzfWyyi",
+          "mode": "list",
+          "cachedResultName": "analized_articles",
+          "cachedResultUrl": "/projects/s4LR2IfxRhUS3SEP/datatables/5whI1zLhZwzfWyyi"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "article_link": "={{ $json.output.link }}",
+            "title": "={{ $json.output.headline }}",
+            "score": "={{ $json.output.score }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "article_link",
+              "displayName": "article_link",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "title",
+              "displayName": "title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "analyzed_at",
+              "displayName": "analyzed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "score",
+              "displayName": "score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "optimizeBulk": false
+        }
+      },
+      "id": "bd1bbe98-a922-4414-88b2-e47658c40395",
+      "name": "Record Analyzed Article",
+      "type": "n8n-nodes-base.dataTable",
+      "position": [
+        12192,
+        4720
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "deleteRows",
+        "dataTableId": {
+          "__rl": true,
+          "value": "5whI1zLhZwzfWyyi",
+          "mode": "list",
+          "cachedResultName": "analized_articles",
+          "cachedResultUrl": "/projects/s4LR2IfxRhUS3SEP/datatables/5whI1zLhZwzfWyyi"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "analyzed_at",
+              "condition": "lt",
+              "keyValue": "={{ $now.minus({days: 7}).toISO() }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "7bd50540-9ea2-415d-87f5-3393e7060b52",
+      "name": "Cleanup Old Records",
+      "type": "n8n-nodes-base.dataTable",
+      "position": [
+        12400,
+        4720
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Dynamic AI Prompt Generator — versão 3.1\n// Correção: detector de conteúdo insuficiente + aviso ao LLM\n// ============================================================\n\nconst items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const j = item.json;\n\n  const urgencyContext = j.preScore >= 9\n    ? 'EXTREME URGENCY — Black Swan event. This could reshape global markets immediately.'\n    : j.preScore === 8\n    ? 'HIGH URGENCY — Major market mover. Significant geopolitical or crypto impact expected.'\n    : 'RELEVANT — Notable development worth monitoring, but not an immediate market shock.';\n\n  // ✅ NOVO v3.1 — Detector de conteúdo insuficiente\n  const contentWarning = j.contentSnippet && j.contentSnippet.length < 200\n    ? 'WARNING: The content snippet is very short (' + j.contentSnippet.length + ' chars). Write only what is explicitly stated above. DO NOT invent or assume any facts. If there is not enough information for 3 full paragraphs, write shorter paragraphs and set score to 3 or below.'\n    : 'Content is sufficient — write all 3 paragraphs fully based on the article data.';\n\n  const userPrompt = `\nYou are a Senior Breaking News Editor specializing in Global Geopolitics and Bitcoin Markets.\n\nARTICLE DATA:\n- Title: ${j.title}\n- Source: ${j.source} (${j.domain})\n- Published: ${j.pubDate}\n- Pre-Score (local urgency filter): ${j.preScore}/10\n- Urgency context: ${urgencyContext}\n- Content warning: ${contentWarning}\n- Content: ${j.contentSnippet}\n- Original URL: ${j.link}\n\nYOUR TASK:\nAnalyze the article above and return ONLY a raw valid JSON object.\nNo markdown. No backticks. No explanation. No text before or after the JSON.\nYour entire response must be directly parseable by JSON.parse().\n\nREQUIRED JSON FIELDS:\n{\n  \"headline\": \"string — High-impact headline in English, max 15 words, communicates urgency and consequence\",\n  \"hook\": \"string — One sharp opening sentence in English, max 25 words, must create tension or surprise\",\n  \"conteudo_blog\": \"string — Exactly 3 paragraphs in English, total between 150 and 250 words\",\n  \"tags\": \"string — Space-separated hashtags in English, max 5 tags, e.g. #Bitcoin #Geopolitics #Fed\",\n  \"score\": \"integer — Your final urgency score from 1 to 10, whole number only\",\n  \"should_alert\": \"boolean — true if your score is 8 or higher, false otherwise\",\n  \"link\": \"${j.link}\"\n}\n\nSCORING GUIDE — be precise, do not inflate scores:\n- 9-10: True Black Swan — active major war escalation, central bank collapse, exchange hack above $1B, emergency G7 response\n- 7-8:  Market mover — ETF approval/rejection, Fed rate decision, country-wide crypto ban, major sanctions package, nuclear threat\n- 5-6:  Geopolitically relevant — elections, regional conflicts, regulatory proposals, significant political shifts\n- 3-4:  Domestic politics — local legislation, state-level decisions, party disputes without direct market impact\n- 1-2:  Low impact — price opinions, minor altcoin updates, routine political statements, soft feature stories\n\nSTRICT RULES — violations will break the pipeline:\n- score MUST be a whole INTEGER — never 7.5, never 0.8, never a string\n- should_alert MUST be a boolean true or false — never a string \"true\"\n- ALL text fields (headline, hook, conteudo_blog, tags) MUST be written in English\n- conteudo_blog MUST be between 150 and 250 words total — count before responding\n- NEVER copy sentences verbatim from the source content — aggressively paraphrase\n- NEVER invent facts not present in the article data above\n- link MUST be the exact original URL provided — do not shorten, alter or invent it\n- tags must use the # symbol and relate directly to the article topic\n`.trim();\n\n  results.push({\n    json: {\n      link:           j.link,\n      title:          j.title,\n      source:         j.source,\n      domain:         j.domain,\n      isTier1:        j.isTier1,\n      slug:           j.slug,\n      pubDate:        j.pubDate,\n      preScore:       j.preScore,\n      isVip:          j.isVip,\n      contentSnippet: j.contentSnippet,\n      userPrompt:     userPrompt,\n    }\n  });\n}\n\nconst hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });\nconsole.log('Prompt Generator ' + hora + ': ' + results.length + ' prompts gerados');\nresults.forEach((r, i) => {\n  console.log('  [' + (i+1) + '] preScore ' + r.json.preScore + '/10 | content ' + (r.json.contentSnippet || '').length + ' chars | ' + (r.json.title || '').substring(0, 50) + '...');\n});\n\nreturn results;"
+      },
+      "id": "a0957498-8d98-4db9-b431-b3f4c1fb2008",
+      "name": "Dynamic AI Prompt Generator",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        11328,
+        4416
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.2.15:3000/publish",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.dados_prontos.content }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.dados_prontos.title }}"
+            },
+            {
+              "name": "id_noticia",
+              "value": "={{ $('Switch1').item.json.data.url }}"
+            },
+            {
+              "name": "hook",
+              "value": "={{ $json.dados_prontos.hook }}"
+            },
+            {
+              "name": "summary",
+              "value": "={{ $json.dados_prontos.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13616,
+        3904
+      ],
+      "id": "a55e42a3-61f8-4544-8239-735a52d42d8a",
+      "name": "HTTP Request1"
+    },
+    {
+      "parameters": {
+        "maxItems": 4
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        11168,
+        4416
+      ],
+      "id": "f48cd27b-4ea2-406e-8653-c9c5c74bbd67",
+      "name": "Limit",
+      "executeOnce": false
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        13152,
+        5120
+      ],
+      "id": "991f501c-cbfa-4f47-b57b-65650078d68d",
+      "name": "Groq Chat Model",
+      "credentials": {
+        "groqApi": {
+          "id": "y8uHZGg3zklfvhzM",
+          "name": "jt95"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a strict JSON-only response machine.\nYou NEVER add markdown, backticks, explanations or any text outside the JSON object.\nYour entire response must be parseable by JSON.parse().\nAlways write headline, hook, conteudo_blog and tags in English.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.userPrompt }}"
+        }
+      },
+      "id": "4bd65683-3486-48ea-8cb0-1eb057ec15ef",
+      "name": "Breaking News Analyzer1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        11680,
+        4240
+      ],
+      "typeVersion": 2.2,
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"headline\": \"A high-impact breaking news headline\",\n  \"hook\": \"A sharp one-sentence hook that grabs the reader\",\n  \"tags\": \"#Bitcoin #Geopolitics #Fed\",\n  \"score\": 8,\n  \"should_alert\": true,\n  \"link\": \"https://original-article-url.com\"\n}"
+      },
+      "id": "f291ffa3-61f2-4af3-b168-93e865262d65",
+      "name": "Structured Output Parser1",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "position": [
+        11824,
+        4432
+      ],
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        11680,
+        4432
+      ],
+      "id": "5f73886f-ca9d-466a-b76d-259e1755a6c8",
+      "name": "Groq Chat Model1",
+      "credentials": {
+        "groqApi": {
+          "id": "gbumaZu8oLpXhds2",
+          "name": "jt99"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "b9e98f8b-9538-458a-9356-41df472ee423",
+              "name": "alert_threshold",
+              "value": "8",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        9776,
+        4416
+      ],
+      "id": "9f234332-9d54-44ce-89bf-319ffad94362",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "{\n  \"config_id\": \"bbn_global_crypto_br\",\n  \"config_name\": \"BBN - Geopolítica, Bitcoin e Brasil\",\n  \"ai_role\": \"analista sênior de geopolítica mundial, especialista em mercado de Bitcoin e política econômica brasileira, com fluência em inglês e português\",\n  \"alert_threshold\": 8,\n  \"retention_days\": 7,\n  \"schedule_interval\": \"30min\",\n  \"primary_keywords\": [\n    \"world\",\n    \"geopolitics\",\n    \"global\",\n    \"conflict\",\n    \"war\",\n    \"guerra\",\n    \"conflito\",\n    \"mundo\",\n    \"bitcoin\",\n    \"btc\",\n    \"crypto\",\n    \"criptomoeda\",\n    \"criptomoedas\",\n    \"blockchain\",\n    \"brasil\",\n    \"brazil\",\n    \"brasília\",\n    \"lula\",\n    \"stf\",\n    \"banco central\",\n    \"haddad\",\n    \"china\",\n    \"india\",\n    \"asia\",\n    \"us\",\n    \"eua\",\n    \"russia\",\n    \"putin\",\n    \"biden\",\n    \"trump\"\n  ],\n  \"secondary_keywords\": [\n    \"military\",\n    \"strike\",\n    \"missile\",\n    \"treaty\",\n    \"sanction\",\n    \"election\",\n    \"ataque\",\n    \"sanção\",\n    \"eleição\",\n    \"etf\",\n    \"halving\",\n    \"regulation\",\n    \"mining\",\n    \"sec\",\n    \"binance\",\n    \"fed\",\n    \"selic\",\n    \"inflation\",\n    \"inflação\",\n    \"pib\",\n    \"gdp\",\n    \"trade\",\n    \"embargo\",\n    \"tensão\",\n    \"diplomacia\",\n    \"acordo\",\n    \"juros\",\n    \"taxa\",\n    \"mercado\"\n  ],\n  \"scoring_criteria\": [\n    {\n      \"score_min\": 9,\n      \"score_max\": 10,\n      \"category\": \"Evento Crítico / Black Swan\",\n      \"description\": \"Início de guerras, ataques militares de grande escala, quebra de corretoras globais (ex: Binance), variação extrema do Bitcoin ou crises institucionais/econômicas graves no Brasil.\"\n    },\n    {\n      \"score_min\": 8,\n      \"score_max\": 9,\n      \"category\": \"Impacto de Mercado / Alta Urgência\",\n      \"description\": \"Regulamentações agressivas da SEC, sanções econômicas internacionais, decisões de juros do FED ou COPOM (Selic), e grandes tensões diplomáticas (ex: China/Taiwan).\"\n    },\n    {\n      \"score_min\": 7,\n      \"score_max\": 8,\n      \"category\": \"Geopolítica e Macroeconomia\",\n      \"description\": \"Acordos comerciais internacionais, movimentações massivas de Bitcoin, reformas políticas/fiscais no Brasil e resultados de eleições importantes.\"\n    },\n    {\n      \"score_min\": 6,\n      \"score_max\": 7,\n      \"category\": \"Atualizações Relevantes\",\n      \"description\": \"Aprovações de ETFs, dados econômicos de impacto moderado (IPCA, PIB), reuniões diplomáticas e adoção institucional de criptomoedas.\"\n    },\n    {\n      \"score_min\": 5,\n      \"score_max\": 6,\n      \"category\": \"Informativo\",\n      \"description\": \"Análises de mercado rotineiras, atualizações de tecnologia blockchain e notícias políticas cotidianas sem impacto imediato no mercado.\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        9984,
+        4416
+      ],
+      "id": "5738f0ba-748d-4efb-8dcf-8ed84c0a50f1",
+      "name": "Edit Fields1"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        11680,
+        4768
+      ],
+      "id": "d566c9cc-5536-41ef-bd18-c5edc610e5ba",
+      "name": "Groq Chat Model2",
+      "credentials": {
+        "groqApi": {
+          "id": "xDmOMubmmh1l2ssN",
+          "name": "jt97"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        12400,
+        4400
+      ],
+      "id": "f205fa79-4dcb-4abc-bb83-5766f0c5392a",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $itemIndex % 5 }}",
+                    "rightValue": 0,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    },
+                    "id": "66055e1c-10a4-496a-8f5f-036e3509a736"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8867b9d0-f666-4066-bf4e-0883e5919684",
+                    "leftValue": "={{ $itemIndex % 5 }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "4583dba2-dcb7-4142-b4c1-24755bfe9744",
+                    "leftValue": "={{ $itemIndex % 5 }}",
+                    "rightValue": 2,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "62a7b15f-18c7-4972-a8ba-f6614ce1e8e1",
+                    "leftValue": "={{ $itemIndex % 5 }}",
+                    "rightValue": 3,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        12976,
+        4384
+      ],
+      "id": "d286fb6a-eafa-46ae-871d-281ed2ec131d",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        13152,
+        4432
+      ],
+      "id": "f3c0d712-60a0-4302-9593-f2ac8d18500d",
+      "name": "Groq Chat Model3",
+      "credentials": {
+        "groqApi": {
+          "id": "qYpkRZW55bTBK5Fm",
+          "name": "jt98"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        13152,
+        4064
+      ],
+      "id": "c77bb693-d361-4839-81bb-47109383a824",
+      "name": "Groq Chat Model4",
+      "credentials": {
+        "groqApi": {
+          "id": "5rGtTvgdQU1PJzwL",
+          "name": "zhekbr"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        13152,
+        4784
+      ],
+      "id": "997b9dd9-ad88-4cce-9f8b-62cb90262508",
+      "name": "Groq Chat Model5",
+      "credentials": {
+        "groqApi": {
+          "id": "IRpxidblvKeFn4SF",
+          "name": "npcpk"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "for (const item of $input.all()) {\n  // O SEGREDO ESTÁ AQUI: Apontar diretamente para 'data.content'\n  let text = item.json.data.content || \"\";\n\n  // 1. O Exterminador de Tickers do CoinDesk\n  text = text.replace(/\\[[A-Za-z0-9\\s]+?\\$[\\d,\\.]+\\s+[\\d,\\.]+?%\\]/gi, '');\n\n  // 2. O Destruidor de Links Gigantes Markdown\n  text = text.replace(/\\[.*?\\]\\((https?:\\/\\/[^\\s]+)\\)/gi, '');\n\n  // 3. Limpeza de menus inúteis do CoinDesk\n  text = text.replace(/Share this article/gi, '');\n  text = text.replace(/Copy link/gi, '');\n\n  // Cria uma nova variável com o texto limpo para o Llama 3\n  item.json.clean_content = text.trim();\n}\n\nreturn $input.all();"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        12800,
+        4416
+      ],
+      "id": "c3df7eee-5cea-487c-9881-6f66aa8ab6a5",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "let texto = $input.item.json.output || \"\";\n\n// Limpa lixo de markdown\ntexto = texto.replace(/^```json\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\ntry {\n    // Tenta o parse padrão primeiro\n    $input.item.json.dados_prontos = JSON.parse(texto);\n} catch (e) {\n    // Se falhar, usamos uma extração \"inteligente\" que busca até a próxima chave ou o fim do JSON\n    $input.item.json.dados_prontos = {};\n\n    const extrair = (chave) => {\n        // Busca o conteúdo ignorando aspas internas, parando apenas quando encontra \", \"chave\": ou o fim }\n        const regex = new RegExp(`\"${chave}\"\\\\s*:\\\\s*\"([\\\\s\\\\S]*?)\"(?=\\\\s*,?\\\\s*\"[a-zA-Z0-9_]+\"\\\\s*:|\\\\s*})`, \"i\");\n        const match = texto.match(regex);\n        return match ? match[1] : null;\n    };\n\n    let blog = extrair(\"conteudo_blog\");\n    let head = extrair(\"headline\");\n    let summ = extrair(\"summary\");\n    let hook = extrair(\"hook\");\n\n    if (blog) $input.item.json.dados_prontos.content = blog.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (head) $input.item.json.dados_prontos.title = head.replace(/\\\\\"/g, '\"');\n    if (summ) $input.item.json.dados_prontos.summary = summ.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (hook) $input.item.json.dados_prontos.hook = hook.replace(/\\\\\"/g, '\"');\n}\n\n// Garante que o n8n sempre veja os nomes certos para a Ponte Nostr\n$input.item.json.dados_prontos.content = $input.item.json.dados_prontos.content || $input.item.json.dados_prontos.conteudo_blog;\n$input.item.json.dados_prontos.title = $input.item.json.dados_prontos.title || $input.item.json.dados_prontos.headline;\n\nreturn $input.item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13440,
+        4592
+      ],
+      "id": "433b5c0d-77b0-4d68-928f-86324faf29e9",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "operation": "rowNotExists",
+        "dataTableId": {
+          "__rl": true,
+          "value": "5whI1zLhZwzfWyyi",
+          "mode": "list",
+          "cachedResultName": "analized_articles",
+          "cachedResultUrl": "/projects/s4LR2IfxRhUS3SEP/datatables/5whI1zLhZwzfWyyi"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "article_link",
+              "keyValue": "={{ $json.link.split('?')[0] }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        11024,
+        4416
+      ],
+      "id": "61eaf073-5d84-4906-ae2b-d46815266fd2",
+      "name": "If row does not exist"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// Dynamic Filter Node - BBN Recency-First Edition\n// ============================================================\n\nconst config = {\n  \"config_id\": \"bbn_global_crypto_br\",\n  \"primary_keywords\": [\n    \"world\", \"geopolitics\", \"global\", \"conflict\", \"war\", \"guerra\", \"conflito\", \"mundo\", \"bitcoin\", \"btc\", \"crypto\", \"criptomoeda\", \"criptomoedas\", \"blockchain\", \"brasil\", \"brazil\", \"brasília\", \"lula\", \"stf\", \"banco central\", \"haddad\", \"china\", \"india\", \"asia\", \"us\", \"eua\", \"russia\", \"putin\", \"biden\", \"trump\"\n  ],\n  \"secondary_keywords\": [\n    \"military\", \"strike\", \"missile\", \"treaty\", \"sanction\", \"election\", \"ataque\", \"sanção\", \"eleição\", \"etf\", \"halving\", \"regulation\", \"mining\", \"sec\", \"binance\", \"fed\", \"selic\", \"inflation\", \"inflação\", \"pib\", \"gdp\", \"trade\", \"embargo\", \"tensão\", \"diplomacia\", \"acordo\", \"juros\", \"taxa\", \"mercado\"\n  ]\n};\n\nconst vipKeywords = [\"bitcoin\", \"btc\", \"crypto\", \"criptomoeda\", \"criptomoedas\"];\nconst highImpactKeywords = [\"war\", \"guerra\", \"ataque\", \"strike\", \"sanction\", \"sanção\", \"crash\", \"collapse\", \"colapso\"];\n\nconst calcPreScore = (item, searchContext) => {\n  let score = 0;\n\n  // 1. PESO DE RECÊNCIA (O coração do filtro)\n  if (item.pubDate) {\n    const ageInHours = (Date.now() - new Date(item.pubDate).getTime()) / (1000 * 60 * 60);\n    \n    if (ageInHours <= 1) score += 6;      // Saiu agora (até 1h): Bônus máximo\n    else if (ageInHours <= 3) score += 4; // Fresca (1h a 3h)\n    else if (ageInHours <= 6) score += 2; // Morna (3h a 6h)\n    else if (ageInHours <= 12) score += 1;// Antiga (6h a 12h)\n    // Notícias com mais de 12h não ganham bônus de tempo\n  }\n\n  // 2. PESO DE CONTEÚDO (Impacto e VIP)\n  if (highImpactKeywords.some(kw => searchContext.includes(kw))) score += 2;\n  if (vipKeywords.some(kw => searchContext.includes(kw))) score += 2;\n\n  // 3. BÔNUS DE AUTORIDADE\n  if (item.isTier1 === true) score += 1;\n\n  return score; // Sem limite de 10 para permitir que a recência seja o desempate real\n};\n\nconst candidates = [];\n\nfor (const item of $input.all()) {\n  const json = item.json;\n  const title = json.title || \"\";\n  const snippet = json.contentSnippet || \"\";\n  const searchContext = `${title} ${snippet}`.toLowerCase();\n  \n  const isVip = vipKeywords.some(kw => searchContext.includes(kw));\n  const hasPrimary = config.primary_keywords.some(kw => searchContext.includes(kw));\n  const hasSec = config.secondary_keywords.some(kw => searchContext.includes(kw));\n\n  // Filtro de relevância: VIP ou Primária + Secundária\n  if (!isVip && !(hasPrimary && hasSec)) {\n    continue;\n  }\n\n  const preScore = calcPreScore(json, searchContext);\n\n  // Threshold: Ajustado para 4. \n  // Uma notícia de Bitcoin (2 pts) que saiu agora (6 pts) somaria 8. Passa com folga.\n  if (preScore < 4) { \n    continue;\n  }\n\n  candidates.push({\n    json: {\n      ...json,\n      preScore: preScore,\n      isVip: isVip,\n      bbn_config: config\n    }\n  });\n}\n\n// ORDENAÇÃO: O mais pesado (Score alto) no topo.\n// Como o Score agora é dominado pela recência, as notícias novas \"atropelam\" as velhas.\nconst sortedCandidates = candidates.sort((a, b) => b.json.preScore - a.json.preScore);\n\nreturn sortedCandidates;"
+      },
+      "id": "8d9c1cb1-abc5-46f0-a9d0-d295263765b5",
+      "name": "Dynamic Filter",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        10864,
+        4416
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "jsCode": "// Função auxiliar para limpar tags HTML\nconst stripHTML = (html) => {\n  if (!html) return '';\n  return html.replace(/<[^>]*>/g, '').trim();\n};\n\nconst cleanedItems = [];\n\nfor (const item of $input.all()) {\n  const json = item.json;\n\n  const TIER1_DOMAINS = [\n  'reuters.com', 'bbc.co.uk', 'bbc.com',\n  'apnews.com', 'aljazeera.com', 'theguardian.com',\n  'ft.com', 'zerohedge.com', 'al-monitor.com', 'cnbc.com'\n];\n\n  // 1. Extração de Fonte (Mantive sua lógica que já é excelente)\n  const source = json.creator || json['dc:creator'] || json.author || 'Unknown';\n\n  // 2. Extração de Conteúdo (AGORA BLINDADA PARA OS 10 FEEDS)\n  // Ele procura a informação na ordem das chaves mais ricas para as mais simples\n  let rawContent = json['content:encoded'] || json.contentSnippet || json.content || json.description || '';\n  const contentSnippet = stripHTML(rawContent);\n\n  // 3. Extração de Data (Com fallback de segurança caso o feed não envie data)\n  const pubDate = json.isoDate || json.pubDate || new Date().toISOString();\n\n  // 4. Montagem do payload limpo\n  cleanedItems.push({\n    json: {\n      link: json.link,                    \n      title: stripHTML(json.title), // Limpamos o título também, alguns feeds enviam sujeira aqui               \n      contentSnippet: contentSnippet,     \n      pubDate: pubDate,                   \n      source: source                      \n    }\n  });\n}\n\nreturn cleanedItems;"
+      },
+      "id": "5efce03e-cfd8-4ccf-8cd2-7374210cad35",
+      "name": "RSS_Cleanup_Node1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        10704,
+        4416
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "numberInputs": 10
+      },
+      "id": "1584c0fe-c416-4b7a-b36a-877a30263b67",
+      "name": "Merge",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        10400,
+        4560
+      ],
+      "typeVersion": 3.2,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "url": "https://www.cnbc.com/id/100727362/device/rss/rss.html",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "171a93b5-4e33-4124-9323-3d9c7bbf25b3",
+      "name": "cnbc",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        6080
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.scmp.com/rss/91/feed",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "83b910d2-4d8a-4a79-9bc6-48e6c4cb1e56",
+      "name": "scmp",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        5936
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://foreignpolicy.com/feed/",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "ce68b6fd-d6f4-46e2-8b2d-6ff172ea52b3",
+      "name": "foreignpolicy",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        5760
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.defensenews.com/arc/outboundfeeds/rss/",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "b5aaf87b-bcf5-4688-9f41-e00774dae0d4",
+      "name": "thedefensepost",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        5616
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://oilprice.com/rss/main",
+        "options": {}
+      },
+      "id": "b8b4e3cf-59f1-4915-af73-18b239952b03",
+      "name": "oilprice",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        5440
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.middleeasteye.net/rss",
+        "options": {}
+      },
+      "id": "eef63bac-5031-4e03-ab42-801ea0f3d9a5",
+      "name": "middle-east",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        5264
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.kitco.com/news/category/gold/feed/",
+        "options": {}
+      },
+      "id": "5a77c73b-7ae0-4b86-8f54-853585913874",
+      "name": "kitco",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        5104
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://finance.yahoo.com/news/rssindex",
+        "options": {}
+      },
+      "id": "9101bcfd-6cf6-401f-b256-eeb2c0061b66",
+      "name": "yahoo-rssindex",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        4960
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.ft.com/global-economy?format=rss",
+        "options": {}
+      },
+      "id": "df29b1f0-7646-48ed-941d-c8b079353cda",
+      "name": "FT",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        4816
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://feeds.feedburner.com/zerohedge/feed",
+        "options": {}
+      },
+      "id": "9b29edf9-51f3-436d-b159-6e5d9c12d4b3",
+      "name": "feedburner",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        4672
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://thediplomat.com/feed/",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "176ec36e-6bab-46d1-ac18-8abc595f78ba",
+      "name": "thediplomat",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        4256
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://rss.cnn.com/rss/edition_world.rss",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "f375ee8d-ec63-42ac-a0aa-db690049a2df",
+      "name": "cnn",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        4112
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://decrypt.co/feed",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "0d4f7655-bd5b-46f1-98cc-13063b517ede",
+      "name": "cryptopanic",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        3936
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.theguardian.com/world/rss",
+        "options": {
+          "ignoreSSL": false
+        }
+      },
+      "id": "ae1a35cf-4e94-47f6-9c77-f5d7e0ab62c2",
+      "name": "theguardian",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        3792
+      ],
+      "typeVersion": 1.1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=when:24h+allinurl:reuters.com&hl=en",
+        "options": {}
+      },
+      "id": "d651948c-344b-46e3-8b49-5a1f28585fac",
+      "name": "reuters",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        3616
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=when:24h+allinurl:apnews.com&hl=en",
+        "options": {}
+      },
+      "id": "53cbc165-856f-40f8-9655-14ba8633ed2c",
+      "name": "apnews",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        3440
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.aljazeera.com/xml/rss/all.xml",
+        "options": {}
+      },
+      "id": "d0285804-5c1d-4ef0-9176-6d14ff032f56",
+      "name": "aljazeera",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        3280
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "http://feeds.bbci.co.uk/news/world/rss.xml",
+        "options": {}
+      },
+      "id": "1136e8b5-459e-44a5-97b7-1440617b4dfc",
+      "name": "bbci",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        3136
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://www.coindesk.com/arc/outboundfeeds/rss/",
+        "options": {}
+      },
+      "id": "87207001-170d-4581-ad7c-dd0478e08324",
+      "name": "coindesk1",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        2992
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://cointelegraph.com/rss",
+        "options": {}
+      },
+      "id": "2baef5d7-d6f9-49c8-98c4-5c2946304674",
+      "name": "cointelegraph",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "position": [
+        10096,
+        2848
+      ],
+      "typeVersion": 1,
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 10
+      },
+      "id": "0be3eb50-3c29-4600-ac94-73fe05d1bd05",
+      "name": "Merge2",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        10400,
+        4032
+      ],
+      "typeVersion": 3.2,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {},
+      "id": "a6b7e96e-9462-4feb-9511-4b10bf6ab336",
+      "name": "Merge3",
+      "type": "n8n-nodes-base.merge",
+      "position": [
+        10528,
+        4416
+      ],
+      "typeVersion": 3.2,
+      "alwaysOutputData": false
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# ROLE\nYou are the Senior Editor-in-Chief of BBN (Bitcoin Brasil News). Your mission is to write premium, original articles based on raw scraped news data.\n\nUse negrito (formatação markdown) para destacar números importantes, empresas ou termos-chave do mercado cripto para facilitar a leitura dinâmica.\n\n# TASK\n1. REWRITE: Create a completely original article. Plagiarism is forbidden.\n2. LANGUAGE: ALL generated content MUST be strictly in perfectly natural ENGLISH-US.\n3. TONALITY: Professional, analytical, authoritative, and direct.\n4. STRICT GROUNDING: You MUST base your entire article STRICTLY on the facts provided in the \"RAW NEWS DATA\" below. Do NOT invent events and do NOT hallucinate.\n\nIMPORTANT: Return ONLY the raw JSON object. Do not use markdown code blocks like ```json. Do not include any conversational text before or after the JSON.\n\n# THE \"CONTEUDO_BLOG\" STRUCTURE\nThe `conteudo_blog` field MUST be a long-form article formatted EXACTLY in this order:\n- 1 or 2 introductory paragraphs detailing the news facts. (DO NOT place the headline here).\n- The exact Markdown heading: `## The Scenario`\n- Under \"The Scenario\", explain the geopolitical, economic, or regulatory background of the event.\n- (Optional) If the background is complex, use the heading: `## The Scenario Continued`\n- The exact Markdown heading: `## BBN Insight`\n- Under \"BBN Insight\", provide exclusive analysis on how this impacts Bitcoin, the crypto market, and investors.\n- Blank line.\n- Finally, add a references footer extracting the data from the raw text, formatted exactly like this:\nReferences and Credits:\n* Original Source: [Extract Source Name]\n* Link: [Extract URL]\n\n# MANDATORY JSON OUTPUT FORMAT\nCRITICAL: Return a flat JSON object with the exact 5 keys below. Do not nest it.\n\n{\n  \"headline\": \"A highly clickable title in english-us\",\n  \"hook\": \"A sharp one-paragraph lead in english-us\",\n  \"summary\": \"A 2-sentence summary in english-us\",\n  \"conteudo_blog\": \"The full article strictly following the structure above, starting directly with the introductory paragraphs. Do NOT repeat the headline.\",\n  \"tag\": \"#RelevantHashtags #Crypto\"\n}\n\n# RAW NEWS DATA\nTitle: {{ $json.data.title }}\nLink: {{ $json.data.url }}\nContent: {{ $json.content || $json.clean_content }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      },
+      "id": "6fcf8613-97f9-43fa-9bda-440ce4bc164a",
+      "name": "Blog3",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        13152,
+        4592
+      ],
+      "typeVersion": 2.2,
+      "retryOnFail": false,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# ROLE\nYou are the Senior Editor-in-Chief of BBN (Bitcoin Brasil News). Your mission is to write premium, original articles based on raw scraped news data.\n\nUse negrito (formatação markdown) para destacar números importantes, empresas ou termos-chave do mercado cripto para facilitar a leitura dinâmica.\n\n# TASK\n1. REWRITE: Create a completely original article. Plagiarism is forbidden.\n2. LANGUAGE: ALL generated content MUST be strictly in perfectly natural ENGLISH-US.\n3. TONALITY: Professional, analytical, authoritative, and direct.\n4. STRICT GROUNDING: You MUST base your entire article STRICTLY on the facts provided in the \"RAW NEWS DATA\" below. Do NOT invent events and do NOT hallucinate.\n\nIMPORTANT: Return ONLY the raw JSON object. Do not use markdown code blocks like ```json. Do not include any conversational text before or after the JSON.\n\n# THE \"CONTEUDO_BLOG\" STRUCTURE\nThe `conteudo_blog` field MUST be a long-form article formatted EXACTLY in this order:\n- 1 or 2 introductory paragraphs detailing the news facts. (DO NOT place the headline here).\n- The exact Markdown heading: `## The Scenario`\n- Under \"The Scenario\", explain the geopolitical, economic, or regulatory background of the event.\n- (Optional) If the background is complex, use the heading: `## The Scenario Continued`\n- The exact Markdown heading: `## BBN Insight`\n- Under \"BBN Insight\", provide exclusive analysis on how this impacts Bitcoin, the crypto market, and investors.\n- Blank line.\n- Finally, add a references footer extracting the data from the raw text, formatted exactly like this:\nReferences and Credits:\n* Original Source: [Extract Source Name]\n* Link: [Extract URL]\n\n# MANDATORY JSON OUTPUT FORMAT\nCRITICAL: Return a flat JSON object with the exact 5 keys below. Do not nest it.\n\n{\n  \"headline\": \"A highly clickable title in english-us\",\n  \"hook\": \"A sharp one-paragraph lead in english-us\",\n  \"summary\": \"A 2-sentence summary in english-us\",\n  \"conteudo_blog\": \"The full article strictly following the structure above, starting directly with the introductory paragraphs. Do NOT repeat the headline.\",\n  \"tag\": \"#RelevantHashtags #Crypto\"\n}\n\n# RAW NEWS DATA\nTitle: {{ $json.data.title }}\nLink: {{ $json.data.url }}\nContent: {{ $json.content || $json.clean_content }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      },
+      "id": "511115f9-9c15-4061-82af-dd0752732212",
+      "name": "Blog1",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        13152,
+        3904
+      ],
+      "typeVersion": 2.2,
+      "retryOnFail": false,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# ROLE\nYou are the Senior Editor-in-Chief of BBN (Bitcoin Brasil News). Your mission is to write premium, original articles based on raw scraped news data.\n\nUse negrito (formatação markdown) para destacar números importantes, empresas ou termos-chave do mercado cripto para facilitar a leitura dinâmica.\n\n# TASK\n1. REWRITE: Create a completely original article. Plagiarism is forbidden.\n2. LANGUAGE: ALL generated content MUST be strictly in perfectly natural ENGLISH-US.\n3. TONALITY: Professional, analytical, authoritative, and direct.\n4. STRICT GROUNDING: You MUST base your entire article STRICTLY on the facts provided in the \"RAW NEWS DATA\" below. Do NOT invent events and do NOT hallucinate.\n\nIMPORTANT: Return ONLY the raw JSON object. Do not use markdown code blocks like ```json. Do not include any conversational text before or after the JSON.\n\n# THE \"CONTEUDO_BLOG\" STRUCTURE\nThe `conteudo_blog` field MUST be a long-form article formatted EXACTLY in this order:\n- 1 or 2 introductory paragraphs detailing the news facts. (DO NOT place the headline here).\n- The exact Markdown heading: `## The Scenario`\n- Under \"The Scenario\", explain the geopolitical, economic, or regulatory background of the event.\n- (Optional) If the background is complex, use the heading: `## The Scenario Continued`\n- The exact Markdown heading: `## BBN Insight`\n- Under \"BBN Insight\", provide exclusive analysis on how this impacts Bitcoin, the crypto market, and investors.\n- Blank line.\n- Finally, add a references footer extracting the data from the raw text, formatted exactly like this:\nReferences and Credits:\n* Original Source: [Extract Source Name]\n* Link: [Extract URL]\n\n# MANDATORY JSON OUTPUT FORMAT\nCRITICAL: Return a flat JSON object with the exact 5 keys below. Do not nest it.\n\n{\n  \"headline\": \"A highly clickable title in english-us\",\n  \"hook\": \"A sharp one-paragraph lead in english-us\",\n  \"summary\": \"A 2-sentence summary in english-us\",\n  \"conteudo_blog\": \"The full article strictly following the structure above, starting directly with the introductory paragraphs. Do NOT repeat the headline.\",\n  \"tag\": \"#RelevantHashtags #Crypto\"\n}\n\n# RAW NEWS DATA\nTitle: {{ $json.data.title }}\nLink: {{ $json.data.url }}\nContent: {{ $json.content || $json.clean_content }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      },
+      "id": "ccca8225-5aea-4735-ae90-7f87023c689d",
+      "name": "Blog2",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        13152,
+        4240
+      ],
+      "typeVersion": 2.2,
+      "retryOnFail": false,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "url": "=https://r.jina.ai/{{ $json.output.link }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Return-Format",
+              "value": "markdown"
+            },
+            {
+              "name": "X-No-Cache",
+              "value": "true"
+            },
+            {
+              "name": "X-Remove-Selector",
+              "value": "header, footer, nav, .comments"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer jina_19c2c904c29e4ba6ab80a29148209960CxbPL20HQAqgdt3pUoIDHg6alID_"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        12624,
+        4416
+      ],
+      "id": "a6616393-f7cf-44ea-940b-2ca1cc5c2401",
+      "name": "jina",
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.2.15:3000/publish",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.dados_prontos.content }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.dados_prontos.title }}"
+            },
+            {
+              "name": "id_noticia",
+              "value": "={{ $('Switch1').item.json.data.url }}"
+            },
+            {
+              "name": "hook",
+              "value": "={{ $json.dados_prontos.hook }}"
+            },
+            {
+              "name": "summary",
+              "value": "={{ $json.dados_prontos.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13632,
+        4592
+      ],
+      "id": "84562952-313f-4713-bb5a-11d7f6d1d4ac",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "let texto = $input.item.json.output || \"\";\n\n// Limpa lixo de markdown\ntexto = texto.replace(/^```json\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\ntry {\n    // Tenta o parse padrão primeiro\n    $input.item.json.dados_prontos = JSON.parse(texto);\n} catch (e) {\n    // Se falhar, usamos uma extração \"inteligente\" que busca até a próxima chave ou o fim do JSON\n    $input.item.json.dados_prontos = {};\n\n    const extrair = (chave) => {\n        // Busca o conteúdo ignorando aspas internas, parando apenas quando encontra \", \"chave\": ou o fim }\n        const regex = new RegExp(`\"${chave}\"\\\\s*:\\\\s*\"([\\\\s\\\\S]*?)\"(?=\\\\s*,?\\\\s*\"[a-zA-Z0-9_]+\"\\\\s*:|\\\\s*})`, \"i\");\n        const match = texto.match(regex);\n        return match ? match[1] : null;\n    };\n\n    let blog = extrair(\"conteudo_blog\");\n    let head = extrair(\"headline\");\n    let summ = extrair(\"summary\");\n    let hook = extrair(\"hook\");\n\n    if (blog) $input.item.json.dados_prontos.content = blog.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (head) $input.item.json.dados_prontos.title = head.replace(/\\\\\"/g, '\"');\n    if (summ) $input.item.json.dados_prontos.summary = summ.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (hook) $input.item.json.dados_prontos.hook = hook.replace(/\\\\\"/g, '\"');\n}\n\n// Garante que o n8n sempre veja os nomes certos para a Ponte Nostr\n$input.item.json.dados_prontos.content = $input.item.json.dados_prontos.content || $input.item.json.dados_prontos.conteudo_blog;\n$input.item.json.dados_prontos.title = $input.item.json.dados_prontos.title || $input.item.json.dados_prontos.headline;\n\nreturn $input.item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13456,
+        4240
+      ],
+      "id": "fa064704-ea50-4158-ae29-1a0ee6d48026",
+      "name": "Code in JavaScript4"
+    },
+    {
+      "parameters": {
+        "jsCode": "let texto = $input.item.json.output || \"\";\n\n// Limpa lixo de markdown\ntexto = texto.replace(/^```json\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\ntry {\n    // Tenta o parse padrão primeiro\n    $input.item.json.dados_prontos = JSON.parse(texto);\n} catch (e) {\n    // Se falhar, usamos uma extração \"inteligente\" que busca até a próxima chave ou o fim do JSON\n    $input.item.json.dados_prontos = {};\n\n    const extrair = (chave) => {\n        // Busca o conteúdo ignorando aspas internas, parando apenas quando encontra \", \"chave\": ou o fim }\n        const regex = new RegExp(`\"${chave}\"\\\\s*:\\\\s*\"([\\\\s\\\\S]*?)\"(?=\\\\s*,?\\\\s*\"[a-zA-Z0-9_]+\"\\\\s*:|\\\\s*})`, \"i\");\n        const match = texto.match(regex);\n        return match ? match[1] : null;\n    };\n\n    let blog = extrair(\"conteudo_blog\");\n    let head = extrair(\"headline\");\n    let summ = extrair(\"summary\");\n    let hook = extrair(\"hook\");\n\n    if (blog) $input.item.json.dados_prontos.content = blog.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (head) $input.item.json.dados_prontos.title = head.replace(/\\\\\"/g, '\"');\n    if (summ) $input.item.json.dados_prontos.summary = summ.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (hook) $input.item.json.dados_prontos.hook = hook.replace(/\\\\\"/g, '\"');\n}\n\n// Garante que o n8n sempre veja os nomes certos para a Ponte Nostr\n$input.item.json.dados_prontos.content = $input.item.json.dados_prontos.content || $input.item.json.dados_prontos.conteudo_blog;\n$input.item.json.dados_prontos.title = $input.item.json.dados_prontos.title || $input.item.json.dados_prontos.headline;\n\nreturn $input.item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13456,
+        3904
+      ],
+      "id": "8f5e1f90-a14b-4afd-bb04-9df48fb633d3",
+      "name": "Code in JavaScript5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.2.15:3000/publish",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.dados_prontos.content }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.dados_prontos.title }}"
+            },
+            {
+              "name": "id_noticia",
+              "value": "={{ $('Switch1').item.json.data.url }}"
+            },
+            {
+              "name": "hook",
+              "value": "={{ $json.dados_prontos.hook }}"
+            },
+            {
+              "name": "summary",
+              "value": "={{ $json.dados_prontos.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13632,
+        4240
+      ],
+      "id": "22170097-d7d8-4e3d-b5a5-14b0d05d241f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=# ROLE\nYou are the Senior Editor-in-Chief of BBN (Bitcoin Brasil News). Your mission is to write premium, original articles based on raw scraped news data.\n\nUse negrito (formatação markdown) para destacar números importantes, empresas ou termos-chave do mercado cripto para facilitar a leitura dinâmica.\n\n# TASK\n1. REWRITE: Create a completely original article. Plagiarism is forbidden.\n2. LANGUAGE: ALL generated content MUST be strictly in perfectly natural ENGLISH-US.\n3. TONALITY: Professional, analytical, authoritative, and direct.\n4. STRICT GROUNDING: You MUST base your entire article STRICTLY on the facts provided in the \"RAW NEWS DATA\" below. Do NOT invent events and do NOT hallucinate.\n\nIMPORTANT: Return ONLY the raw JSON object. Do not use markdown code blocks like ```json. Do not include any conversational text before or after the JSON.\n\n# THE \"CONTEUDO_BLOG\" STRUCTURE\nThe `conteudo_blog` field MUST be a long-form article formatted EXACTLY in this order:\n- 1 or 2 introductory paragraphs detailing the news facts. (DO NOT place the headline here).\n- The exact Markdown heading: `## The Scenario`\n- Under \"The Scenario\", explain the geopolitical, economic, or regulatory background of the event.\n- (Optional) If the background is complex, use the heading: `## The Scenario Continued`\n- The exact Markdown heading: `## BBN Insight`\n- Under \"BBN Insight\", provide exclusive analysis on how this impacts Bitcoin, the crypto market, and investors.\n- Blank line.\n- Finally, add a references footer extracting the data from the raw text, formatted exactly like this:\nReferences and Credits:\n* Original Source: [Extract Source Name]\n* Link: [Extract URL]\n\n# MANDATORY JSON OUTPUT FORMAT\nCRITICAL: Return a flat JSON object with the exact 5 keys below. Do not nest it.\n\n{\n  \"headline\": \"A highly clickable title in english-us\",\n  \"hook\": \"A sharp one-paragraph lead in english-us\",\n  \"summary\": \"A 2-sentence summary in english-us\",\n  \"conteudo_blog\": \"The full article strictly following the structure above, starting directly with the introductory paragraphs. Do NOT repeat the headline.\",\n  \"tag\": \"#RelevantHashtags #Crypto\"\n}\n\n# RAW NEWS DATA\nTitle: {{ $json.data.title }}\nLink: {{ $json.data.url }}\nContent: {{ $json.content || $json.clean_content }}",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.systemPrompt }}"
+        }
+      },
+      "id": "768963fc-e0df-4d18-81ad-b1d148fd9f00",
+      "name": "Blog4",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        13152,
+        4944
+      ],
+      "typeVersion": 2.2,
+      "retryOnFail": false,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "let texto = $input.item.json.output || \"\";\n\n// Limpa lixo de markdown\ntexto = texto.replace(/^```json\\s*/i, '').replace(/\\s*```$/i, '').trim();\n\ntry {\n    // Tenta o parse padrão primeiro\n    $input.item.json.dados_prontos = JSON.parse(texto);\n} catch (e) {\n    // Se falhar, usamos uma extração \"inteligente\" que busca até a próxima chave ou o fim do JSON\n    $input.item.json.dados_prontos = {};\n\n    const extrair = (chave) => {\n        // Busca o conteúdo ignorando aspas internas, parando apenas quando encontra \", \"chave\": ou o fim }\n        const regex = new RegExp(`\"${chave}\"\\\\s*:\\\\s*\"([\\\\s\\\\S]*?)\"(?=\\\\s*,?\\\\s*\"[a-zA-Z0-9_]+\"\\\\s*:|\\\\s*})`, \"i\");\n        const match = texto.match(regex);\n        return match ? match[1] : null;\n    };\n\n    let blog = extrair(\"conteudo_blog\");\n    let head = extrair(\"headline\");\n    let summ = extrair(\"summary\");\n    let hook = extrair(\"hook\");\n\n    if (blog) $input.item.json.dados_prontos.content = blog.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (head) $input.item.json.dados_prontos.title = head.replace(/\\\\\"/g, '\"');\n    if (summ) $input.item.json.dados_prontos.summary = summ.replace(/\\\\\"/g, '\"').replace(/\\\\n/g, '\\n');\n    if (hook) $input.item.json.dados_prontos.hook = hook.replace(/\\\\\"/g, '\"');\n}\n\n// Garante que o n8n sempre veja os nomes certos para a Ponte Nostr\n$input.item.json.dados_prontos.content = $input.item.json.dados_prontos.content || $input.item.json.dados_prontos.conteudo_blog;\n$input.item.json.dados_prontos.title = $input.item.json.dados_prontos.title || $input.item.json.dados_prontos.headline;\n\nreturn $input.item;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        13440,
+        4944
+      ],
+      "id": "a1b3658e-d220-423e-b350-96f4f1159e87",
+      "name": "Code in JavaScript6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.0.2.15:3000/publish",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.dados_prontos.content }}"
+            },
+            {
+              "name": "title",
+              "value": "={{ $json.dados_prontos.title }}"
+            },
+            {
+              "name": "id_noticia",
+              "value": "={{ $('Switch1').item.json.data.url }}"
+            },
+            {
+              "name": "hook",
+              "value": "={{ $json.dados_prontos.hook }}"
+            },
+            {
+              "name": "summary",
+              "value": "={{ $json.dados_prontos.summary }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        13632,
+        4944
+      ],
+      "id": "b04b02d0-a77b-4583-af46-fefca89a26d5",
+      "name": "HTTP Request3"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a strict JSON-only response machine.\nYou NEVER add markdown, backticks, explanations or any text outside the JSON object.\nYour entire response must be parseable by JSON.parse().\nAlways write headline, hook, conteudo_blog and tags in English.",
+        "hasOutputParser": true,
+        "options": {
+          "systemMessage": "={{ $json.userPrompt }}"
+        }
+      },
+      "id": "bb13ad97-f7f8-4e6e-9f37-f210aa8e515b",
+      "name": "Breaking News Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "position": [
+        11680,
+        4592
+      ],
+      "typeVersion": 2.2,
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "maxTries": 2,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{\n  \"headline\": \"A high-impact breaking news headline\",\n  \"hook\": \"A sharp one-sentence hook that grabs the reader\",\n  \"tags\": \"#Bitcoin #Geopolitics #Fed\",\n  \"score\": 8,\n  \"should_alert\": true,\n  \"link\": \"https://original-article-url.com\"\n}"
+      },
+      "id": "850eba7c-aff7-49b8-812c-45ec9ad68974",
+      "name": "Structured Output Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "position": [
+        11824,
+        4768
+      ],
+      "typeVersion": 1.3
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $itemIndex % 2 }}",
+                    "rightValue": 0,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    },
+                    "id": "2e5fcc4a-d8da-47bc-9d4f-be15bcba696e"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "47f02e25-3576-42e5-91fa-d1dbdff66dbb",
+                    "leftValue": "={{ $itemIndex % 2 }}",
+                    "rightValue": 1,
+                    "operator": {
+                      "type": "number",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        11488,
+        4416
+      ],
+      "id": "08fa63c9-55b8-4cc5-9223-16756bc17929",
+      "name": "Switch"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        12016,
+        4416
+      ],
+      "id": "3633aa28-e316-4c99-8d74-11fb6dea82dc",
+      "name": "Merge1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every 30 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Record Analyzed Article": {
+      "main": [
+        [
+          {
+            "node": "Cleanup Old Records",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dynamic AI Prompt Generator": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit": {
+      "main": [
+        [
+          {
+            "node": "Dynamic AI Prompt Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Blog4",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser1": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Breaking News Analyzer1",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Breaking News Analyzer1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Breaking News Analyzer1": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields1": {
+      "main": [
+        [
+          {
+            "node": "cnbc",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "scmp",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "foreignpolicy",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "thedefensepost",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "oilprice",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "middle-east",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "kitco",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "yahoo-rssindex",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "FT",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "feedburner",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "cnn",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "cryptopanic",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "theguardian",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "reuters",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "apnews",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "aljazeera",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "bbci",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "coindesk1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "cointelegraph",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "thediplomat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model2": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Breaking News Analyzer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "jina",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model3": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Blog2",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model4": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Blog1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Chat Model5": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Blog3",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "Blog1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Blog2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Blog3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Blog4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If row does not exist": {
+      "main": [
+        [
+          {
+            "node": "Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RSS_Cleanup_Node1": {
+      "main": [
+        [
+          {
+            "node": "Dynamic Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dynamic Filter": {
+      "main": [
+        [
+          {
+            "node": "If row does not exist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "cnbc": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 9
+          }
+        ]
+      ]
+    },
+    "scmp": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 8
+          }
+        ]
+      ]
+    },
+    "foreignpolicy": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "thedefensepost": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "oilprice": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "middle-east": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "kitco": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "yahoo-rssindex": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "FT": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "feedburner": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "thediplomat": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 9
+          }
+        ]
+      ]
+    },
+    "cnn": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 8
+          }
+        ]
+      ]
+    },
+    "cryptopanic": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 7
+          }
+        ]
+      ]
+    },
+    "theguardian": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 6
+          }
+        ]
+      ]
+    },
+    "reuters": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 5
+          }
+        ]
+      ]
+    },
+    "apnews": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "aljazeera": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "bbci": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "coindesk1": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "cointelegraph": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Merge3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge3": {
+      "main": [
+        [
+          {
+            "node": "RSS_Cleanup_Node1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blog3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blog1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blog2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "jina": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Blog4": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structured Output Parser": {
+      "ai_outputParser": [
+        [
+          {
+            "node": "Breaking News Analyzer",
+            "type": "ai_outputParser",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Breaking News Analyzer1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Breaking News Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Breaking News Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Record Analyzed Article",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "10f0ab14-8be7-4ecb-a20e-c2e640791ae5",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "1cc390de27330398b4c9e9b6c1a8608c06bc9971c5a2a9bda762bdf421aaa454"
+  },
+  "id": "eTh7G03v9cgC3xrf",
+  "tags": []
+}

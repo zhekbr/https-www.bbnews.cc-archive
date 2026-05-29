@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BBN – Bitcoin Brasil News</title>
+  <meta name="description" content="Real-time Bitcoin and geopolitics news. Breaking stories from global markets, powered by Nostr.">
+  <meta property="og:title" content="BBN – Bitcoin Brasil News">
+  <meta property="og:description" content="Real-time Bitcoin and geopolitics news. Breaking stories from global markets, powered by Nostr.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://www.bbnews.cc/">
+  <meta property="og:image" content="https://www.bbnews.cc/assets/og-default.png">
+  <meta property="og:site_name" content="BBN – Bitcoin Brasil News">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="BBN – Bitcoin Brasil News">
+  <meta name="twitter:description" content="Real-time Bitcoin and geopolitics news. Breaking stories from global markets, powered by Nostr.">
+  <meta name="twitter:image" content="https://www.bbnews.cc/assets/og-default.png">
+  <link rel="canonical" href="https://www.bbnews.cc/">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://relay.damus.io" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <header>
+    <div class="logo-lockup" onclick="goHome()" style="cursor: pointer" title="Back to Home">
+      <div class="logo">BBN</div>
+      <div class="logo-eyebrow">Bitcoin Brasil News</div>
+    </div>
+    <div class="header-meta">
+      <div class="live-badge"><span class="live-dot"></span>Live</div>
+      <a id="btc-blofin-widget" class="btc-widget" href="https://blofin.com/register?referral_code=LEOAci"
+        target="_blank" rel="noopener noreferrer" title="Open an account on BloFin">
+        <span class="btc-label">BTC/USDT</span>
+        <span class="btc-sep">|</span>
+        <span id="btc-price">Fetching...</span>
+      </a>
+      <div class="date-line" id="date-display"></div>
+    </div>
+  </header>
+  <div class="ticker-wrap">
+    <div class="ticker-belt" id="ticker-belt"></div>
+  </div>
+  <div id="page-home" class="active">
+    <div class="section-label">── Latest news</div>
+    <div class="scroll-row" id="row-0">
+      <div class="scroll-track rev" id="tr0"></div>
+    </div>
+    <div class="expanded-panel" id="panel-0"></div>
+    <div class="scroll-row" id="row-1">
+      <div class="scroll-track slow" id="tr1"></div>
+    </div>
+    <div class="expanded-panel" id="panel-1"></div>
+    <div class="scroll-row" id="row-2">
+      <div class="scroll-track rev" id="tr2"></div>
+    </div>
+    <div class="expanded-panel" id="panel-2"></div>
+  </div>
+
+  <div id="page-article">
+    <div class="article-wrap" id="article-container"></div>
+  </div>
+
+  <footer>
+    <div class="footer-logo">BBN</div>
+    <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; Updated daily &nbsp;·&nbsp; © 2025</div>
+  </footer>
+  <script src="app.js?v=2" defer></script>
+</body>
+
+</html>

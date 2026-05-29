@@ -1,0 +1,16 @@
+{
+  "name": "bbn-ssg",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && npx serve dist",
+    "preview": "npx serve dist"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "serve": "^14.2.0"
+  }
+}
