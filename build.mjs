@@ -93,7 +93,7 @@ function fetchFromNostr() {
 
     const filter = {
       authors: [CONFIG.author],
-      kinds: [30023],
+      kinds: [1, 30023], // <-- ATUALIZADO: Aceitando notas simples e artigos longos
       limit: 50
     };
     const subId = 'bbn_build_' + Math.random().toString(36).substring(2);
