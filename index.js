@@ -17,12 +17,13 @@ app.use(express.json());
 const PRIVATE_KEY = Uint8Array.from(Buffer.from(process.env.NOSTR_PRIV_KEY_HEX, 'hex'));
 
 // Os "alto-falantes" onde o BBN vai gritar as notícias
-const relays = [
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.primal.net',
-  'wss://relay.nostr.band'
-];
+const relays: [
+    'wss://relay.nostr.band',
+    'wss://nos.lol',
+    'wss://relay.damus.io',
+    'wss://relay.primal.net',
+    'wss://relay.snort.social'
+  ],
 
 app.post('/publish', async (req, res) => {
   try {
