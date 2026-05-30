@@ -17,10 +17,12 @@ const CONFIG = {
   baseUrl: process.env.BBN_BASE_URL || 'https://www.bbnews.cc',
   defaultOgImage: '/assets/og-default.png',
   homepageRetentionHours: 48, // 2 days — homepage feed display limit
-  relays: [
-    'wss://relay.damus.io',
+relays: [
+    'wss://relay.nostr.band',
     'wss://nos.lol',
-    'wss://relay.primal.net'
+    'wss://relay.damus.io',
+    'wss://relay.primal.net',
+    'wss://relay.snort.social'
   ],
   author: 'b5467ea20bac695e535859f72589c1429fabdff1518e939515314385ee6c1d50',
   timeoutMs: 8000
