@@ -1,29 +1,73 @@
 <!DOCTYPE html>
-<html lang="en-US">
+<html lang="en">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BBN – Bitcoin Brasil News</title>
-  <meta name="description" content="Real-time Bitcoin and geopolitics news. Breaking stories from global markets, powered by Nostr.">
+  <meta name="description" content="Notícias em tempo real sobre Bitcoin, mercados e geopolítica. Breaking news do mercado cripto global, powered by Nostr.">
   <meta property="og:title" content="BBN – Bitcoin Brasil News">
-  <meta property="og:description" content="Real-time Bitcoin and geopolitics news. Breaking stories from global markets, powered by Nostr.">
+  <meta property="og:description" content="Notícias em tempo real sobre Bitcoin, mercados e geopolítica. Breaking news do mercado cripto global, powered by Nostr.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="{{BASE_URL}}/">
   <meta property="og:image" content="{{BASE_URL}}/assets/og-default.png">
   <meta property="og:site_name" content="BBN – Bitcoin Brasil News">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="BBN – Bitcoin Brasil News">
-  <meta name="twitter:description" content="Real-time Bitcoin and geopolitics news. Breaking stories from global markets, powered by Nostr.">
+  <meta name="twitter:description" content="Notícias em tempo real sobre Bitcoin, mercados e geopolítica. Breaking news do mercado cripto global, powered by Nostr.">
   <meta name="twitter:image" content="{{BASE_URL}}/assets/og-default.png">
+  <!-- Authorship & Robots -->
+  <meta name="author" content="BBN – Bitcoin Brasil News">
+  <meta name="publisher" content="BBN – Bitcoin Brasil News">
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
   <link rel="canonical" href="{{BASE_URL}}/">
+  <!-- Preconnects -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://relay.damus.io" crossorigin>
+  <link rel="preconnect" href="https://www.google-analytics.com">
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  <link rel="dns-prefetch" href="https://www.google-analytics.com">
   <link
     href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap"
     rel="stylesheet">
+  <!-- Favicon & Manifest -->
   <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#F7931A">
   <link rel="stylesheet" href="/style.css?v=1.9">
+  <!-- JSON-LD: WebSite -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "BBN – Bitcoin Brasil News",
+    "url": "https://www.bbnews.cc/",
+    "potentialAction": {
+      "@type": "SearchAction",
+      "target": "https://www.bbnews.cc/archive?q={search_term_string}",
+      "query-input": "required name=search_term_string"
+    }
+  }
+  </script>
+  <!-- JSON-LD: NewsMediaOrganization -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "NewsMediaOrganization",
+    "name": "BBN – Bitcoin Brasil News",
+    "url": "https://www.bbnews.cc/",
+    "logo": {
+      "@type": "ImageObject",
+      "url": "https://www.bbnews.cc/assets/logo.png"
+    },
+    "sameAs": [
+      "https://twitter.com/bbnewscc"
+    ]
+  }
+  </script>
   <!-- Google Analytics 4 -->
   <script async src="https://www.googletagmanager.com/gtag/js?id=G-WWVSBWXE1T"></script>
   <script>

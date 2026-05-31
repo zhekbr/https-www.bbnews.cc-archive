@@ -170,6 +170,37 @@ function generateArticlePage(post, template) {
     ? `<a class="article-source-btn" href="${esc(post.link)}" target="_blank" rel="noopener noreferrer">→ View original source</a>`
     : '';
 
+  // Article category from first tag, fallback to "Notícias"
+  const articleCategory = (post.tags && post.tags.length > 0)
+    ? post.tags[0].charAt(0).toUpperCase() + post.tags[0].slice(1)
+    : 'Notícias';
+
+  // JSON-LD NewsArticle structured data
+  const jsonLdArticle = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "NewsArticle",
+    "headline": post.title,
+    "description": description,
+    "datePublished": post.time,
+    "dateModified": post.time,
+    "image": ogImage,
+    "url": ogUrl,
+    "author": {
+      "@type": "Organization",
+      "name": "BBN – Bitcoin Brasil News"
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "BBN – Bitcoin Brasil News",
+      "logo": {
+        "@type": "ImageObject",
+        "url": `${CONFIG.baseUrl}/assets/logo.png`
+      }
+    },
+    "isAccessibleForFree": true,
+    "inLanguage": "pt-BR"
+  }, null, 4);
+
   let html = template;
   html = html.replace(/\{\{TITLE\}\}/g, () => esc(post.title));
   html = html.replace(/\{\{DESCRIPTION\}\}/g, () => esc(description));
@@ -177,6 +208,9 @@ function generateArticlePage(post, template) {
   html = html.replace(/\{\{OG_DESCRIPTION\}\}/g, () => esc(description));
   html = html.replace(/\{\{OG_URL\}\}/g, () => ogUrl);
   html = html.replace(/\{\{OG_IMAGE\}\}/g, () => ogImage);
+  html = html.replace(/\{\{PUBLISHED_TIME\}\}/g, () => post.time);
+  html = html.replace(/\{\{ARTICLE_CATEGORY\}\}/g, () => esc(articleCategory));
+  html = html.replace(/\{\{JSON_LD_ARTICLE\}\}/g, () => jsonLdArticle);
   html = html.replace(/\{\{BREADCRUMB\}\}/g, () => breadcrumb);
   html = html.replace(/\{\{ARTICLE_TITLE\}\}/g, () => esc(post.title));
   html = html.replace(/\{\{ARTICLE_BODY\}\}/g, () => articleBodyHtml);
@@ -388,6 +422,21 @@ async function build() {
   if (existsSync(favSrc)) {
     cpSync(favSrc, favDest, { force: true });
     console.log('📦 Copied favicon.ico');
+  }
+
+  // Copy manifest.json if it exists
+  const manifestSrc = join(__dirname, 'manifest.json');
+  const manifestDest = join(DIST_DIR, 'manifest.json');
+  if (existsSync(manifestSrc)) {
+    cpSync(manifestSrc, manifestDest, { force: true });
+    console.log('📦 Copied manifest.json');
+  }
+
+  // Copy all files in assets/ directory to dist/assets/
+  const assetsDir = join(__dirname, 'assets');
+  if (existsSync(assetsDir)) {
+    cpSync(assetsDir, join(DIST_DIR, 'assets'), { recursive: true, force: true });
+    console.log('📦 Copied all assets/');
   }
 
   // 7. Generate article pages for ALL articles (permanent SEO URLs)

@@ -664,7 +664,8 @@ footer {
 }
 
 #filter-container {
-  display: flex;
+  /* Temporarily hidden by request / Temporariamente oculto a pedido */
+  display: none !important;
   align-items: center;
   flex-wrap: wrap;
   gap: 15px;
