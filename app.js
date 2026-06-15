@@ -263,6 +263,7 @@ function processArticleRows(rows) {
     const post = { id: row.id, title, body, slug, link: row.link ?? '' };
     slugMap[slug] = post;
     row._slug = slug;
+    row.title = title;
   });
 }
 
@@ -279,17 +280,21 @@ async function fetchFromSupabase() {
   if (!Array.isArray(rows) || rows.length === 0) throw new Error('No articles in Supabase');
 
   // Map Supabase columns to BBN article format
-  return rows.map(row => ({
-    id: String(row.id),
-    headline: (row.headline || 'Untitled').replace(/\*\*/g, '').trim(),
-    conteudo_blog: row.content || row.article_lead || '',
-    summary: row.summary || '',
-    hook: row.hook || '',
-    score: row.score ? parseInt(row.score) : 7,
-    time: row.created_at || new Date().toISOString(),
-    link: '',
-    tags: clientExtractTags(row.headline || '', row.content || '')
-  }));
+  return rows.map(row => {
+    const headlineClean = (row.headline || 'Untitled').replace(/\*\*/g, '').trim();
+    return {
+      id: String(row.id),
+      headline: headlineClean,
+      title: headlineClean,
+      conteudo_blog: row.content || row.article_lead || '',
+      summary: row.summary || '',
+      hook: row.hook || '',
+      score: row.score ? parseInt(row.score) : 7,
+      time: row.created_at || new Date().toISOString(),
+      link: '',
+      tags: clientExtractTags(row.headline || '', row.content || '')
+    };
+  });
 }
 
 async function loadArticles() {
