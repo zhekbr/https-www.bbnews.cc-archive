@@ -935,17 +935,22 @@ async function init() {
         .slice(0, 60);
       populateRows(homepageNoticias);
 
-      // Check if archive grid is already pre-rendered by build.mjs (static HTML).
-      // If so, just activate the controls without overwriting the static grid.
+      // Detect if we are on the static /archive page (served from archive/index.html).
+      // On this page, build.mjs already pre-rendered the grid — never overwrite it.
+      // populateArchive() is only for dynamic navigation from the homepage.
+      const isStaticArchivePage = (
+        window.location.pathname === '/archive' ||
+        window.location.pathname === '/archive/' ||
+        window.location.pathname === '/archive/index.html'
+      );
       const archiveGrid = document.getElementById('archive-grid');
-      const archiveIsPreRendered = archiveGrid && archiveGrid.children.length > 0;
-      if (archiveIsPreRendered) {
-        // Static grid already has the correct articles and slugs — just wire up controls.
-        setupArchiveControls();
-        buildFilters(noticias);
-      } else {
-        // Dynamic path (e.g. navigated from home via JS): build archive from articles.json.
+      if (archiveGrid && !isStaticArchivePage) {
+        // Dynamic path: user navigated here via JS — build archive from articles.json.
         populateArchive(noticias);
+        buildFilters(noticias);
+      } else if (archiveGrid && isStaticArchivePage) {
+        // Static archive page: just wire up search/filter/pagination controls.
+        setupArchiveControls();
         buildFilters(noticias);
       }
     } else if (!isPreRendered) {
@@ -1001,11 +1006,7 @@ setInterval(async () => {
         .sort((a, b) => new Date(b.time) - new Date(a.time))
         .slice(0, 60);
       populateRows(homepageNoticias);
-      // Do not call populateArchive() if the static grid is already rendered.
-      const archiveGrid = document.getElementById('archive-grid');
-      if (archiveGrid && archiveGrid.children.length === 0) {
-        populateArchive(noticias);
-      }
+      // Never call populateArchive() on refresh — archive is a static page.
     }
   } catch (err) {
     console.warn('[BBN] Silent refresh failed:', err.message);
