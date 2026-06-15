@@ -1,4 +1,6 @@
 // --- BBN Configuration ---
+const SUPABASE_URL = 'https://thyibhsuhpxqexjvprct.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoeWliaHN1aHB4cWV4anZwcmN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1OTQ5MjAsImV4cCI6MjA5NjE3MDkyMH0._KQeNO86_wm4yzXEf_2T6GVNFazWdWl0n25Oq1jZtOI';
 
 const ROWS_COUNT = 3;
 const SKELETON_QTY = 4;
@@ -231,34 +233,86 @@ function routeFromURL() {
   showPage('page-home');
   document.title = 'BBN – Bitcoin Brasil News';
 }
+function clientExtractTags(title, content) {
+  const text = `${title} ${content}`.toLowerCase();
+  const tagMap = [
+    ['bitcoin', ['bitcoin', 'btc', 'satoshi', 'lightning']],
+    ['crypto', ['crypto', 'cryptocurrency', 'blockchain', 'defi', 'ethereum', 'altcoin']],
+    ['geopolitics', ['war', 'conflict', 'military', 'sanction', 'nato', 'missile', 'nuclear']],
+    ['economy', ['economy', 'gdp', 'inflation', 'recession', 'fed', 'federal reserve', 'interest rate', 'selic']],
+    ['markets', ['stock', 'nasdaq', 'etf', 'trading', 'gold', 'oil', 's&p']],
+    ['regulation', ['regulation', 'sec', 'ban', 'policy', 'compliance', 'ruling']],
+    ['brazil', ['brazil', 'brasil', 'lula', 'stf', 'haddad', 'selic']],
+    ['energy', ['energy', 'opec', 'petroleum', 'pipeline', 'nuclear']]
+  ];
+  const matched = [];
+  for (const [tag, kws] of tagMap) {
+    if (kws.some(kw => text.includes(kw))) matched.push(tag);
+    if (matched.length >= 4) break;
+  }
+  return matched.length > 0 ? matched : ['news'];
+}
+
+function processArticleRows(rows) {
+  rows.forEach((row) => {
+    const content = row.conteudo_blog || row.headline;
+    const title = row.headline && row.headline !== 'Untitled' ? row.headline : extractTitle(content);
+    const body = extractBody(content, title);
+    let slug = toSlug(title);
+    if (slugMap[slug]) slug = `${slug}-${row.id}`;
+    const post = { id: row.id, title, body, slug, link: row.link ?? '' };
+    slugMap[slug] = post;
+    row._slug = slug;
+  });
+}
+
+async function fetchFromSupabase() {
+  const url = `${SUPABASE_URL}/rest/v1/articles?order=created_at.desc&limit=500&select=*`;
+  const res = await fetch(url, {
+    headers: {
+      'apikey': SUPABASE_ANON_KEY,
+      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+    }
+  });
+  if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
+  const rows = await res.json();
+  if (!Array.isArray(rows) || rows.length === 0) throw new Error('No articles in Supabase');
+
+  // Map Supabase columns to BBN article format
+  return rows.map(row => ({
+    id: String(row.id),
+    headline: (row.headline || 'Untitled').replace(/\*\*/g, '').trim(),
+    conteudo_blog: row.content || row.article_lead || '',
+    summary: row.summary || '',
+    hook: row.hook || '',
+    score: row.score ? parseInt(row.score) : 7,
+    time: row.created_at || new Date().toISOString(),
+    link: '',
+    tags: clientExtractTags(row.headline || '', row.content || '')
+  }));
+}
+
 async function loadArticles() {
   try {
-    const res = await fetch('/articles.json');
-    if (!res.ok) throw new Error('Failed to load articles');
-    const articles = await res.json();
-    if (!Array.isArray(articles) || articles.length === 0) {
-      throw new Error('No articles found');
-    }
-    articles.forEach((row) => {
-      const content = row.conteudo_blog || row.headline;
-      const title = row.headline && row.headline !== 'Untitled' ? row.headline : extractTitle(content);
-      const body = extractBody(content, title);
-      let slug = toSlug(title);
-      if (slugMap[slug]) slug = `${slug}-${row.id}`;
-      const post = {
-        id: row.id,
-        title,
-        body,
-        slug,
-        link: row.link ?? ''
-      };
-      slugMap[slug] = post;
-      row._slug = slug;
-    });
+    // Primary source: Supabase (always up to date)
+    const articles = await fetchFromSupabase();
+    processArticleRows(articles);
+    console.log(`[BBN] Loaded ${articles.length} articles from Supabase`);
     return articles;
-  } catch (err) {
-    console.error('Failed to load articles.json:', err);
-    return [];
+  } catch (supErr) {
+    console.warn('[BBN] Supabase fetch failed, falling back to articles.json:', supErr.message);
+    try {
+      const res = await fetch('/articles.json');
+      if (!res.ok) throw new Error('Failed to load articles.json');
+      const articles = await res.json();
+      if (!Array.isArray(articles) || articles.length === 0) throw new Error('Empty articles.json');
+      processArticleRows(articles);
+      console.log(`[BBN] Loaded ${articles.length} articles from articles.json (fallback)`);
+      return articles;
+    } catch (fallbackErr) {
+      console.error('[BBN] Both Supabase and articles.json failed:', fallbackErr);
+      return [];
+    }
   }
 }
 const esc = str =>

@@ -1,12 +1,12 @@
 // ============================================================
 // BBN Static Site Generator (SSG) — build.mjs
-// Fetches articles from Nostr relays and generates static HTML
+// Fetches articles from Supabase and generates static HTML
 // ============================================================
 
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import WebSocket from 'ws';
+import 'dotenv/config';
 import { toSlug, extractTitle, extractBody, contentToHTML, esc } from './shared.mjs';
 
 // ── Configuration ──────────────────────────────────────────
@@ -14,118 +14,110 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = join(__dirname, 'dist');
 
 const CONFIG = {
-  baseUrl: process.env.BBN_BASE_URL || 'https://www.bbnews.cc',
+  baseUrl: process.env.BBN_BASE_URL || 'https://bbnews.cc',
   defaultOgImage: '/assets/og-default.png',
   homepageRetentionHours: 48, // 2 days — homepage feed display limit
-relays: [
-    'wss://relay.nostr.band',
-    'wss://nos.lol',
-    'wss://relay.damus.io',
-    'wss://relay.primal.net',
-    'wss://relay.snort.social'
-  ],
-  author: 'b5467ea20bac695e535859f72589c1429fabdff1518e939515314385ee6c1d50',
-  timeoutMs: 8000
+  supabaseUrl: process.env.SUPABASE_URL || 'https://thyibhsuhpxqexjvprct.supabase.co',
+  supabaseKey: process.env.SUPABASE_ANON_KEY,
+  supabaseTable: 'articles',
+  supabaseLimit: 500
 };
 const VERSION = Date.now().toString();
 
-// ── Fetch articles from Nostr relays ───────────────────────
-function fetchFromNostr() {
-  return new Promise((resolve, reject) => {
-    const events = new Map();
-    let relaysFinished = 0;
-    let timeoutId;
+// ── Fetch articles from Supabase ──────────────────────────
+async function fetchFromSupabase() {
+  const { supabaseUrl, supabaseKey, supabaseTable, supabaseLimit } = CONFIG;
 
-    const finish = () => {
-      clearTimeout(timeoutId);
-      const list = Array.from(events.values()).map(event => {
-        const getTag = (name) => {
-          const t = event.tags.find(tag => tag[0] === name);
-          return t ? t[1] : '';
-        };
-        const title = (getTag('title') || 'Untitled').replace(/\*\*/g, '');
-        const hook = (getTag('hook') || '').replace(/\*\*/g, '');
-        const summary = (getTag('summary') || getTag('description') || (
-          event.content 
-            ? event.content.substring(0, 120).replace(/^[#*\s]+/gm, '').replace(/\n/g, ' ').trim() + '...' 
-            : ''
-        )).replace(/\*\*/g, '');
-        const id_noticia = getTag('id_noticia') || event.id;
+  if (!supabaseKey) {
+    throw new Error('SUPABASE_ANON_KEY not set in environment variables.');
+  }
 
-        let articleData = {};
-        try {
-          articleData = JSON.parse(event.content);
-        } catch(e) {}
+  let allRows = [];
+  let from = 0;
+  const pageSize = 1000;
 
-        let tags = [];
-        if (event.tags) {
-          tags = event.tags
-            .filter(t => t[0] === 't')
-            .map(t => t[1].replace(/#/g, '').trim().toLowerCase())
-            .filter(Boolean);
-        }
-        if (tags.length === 0 && articleData.tag) {
-          tags = articleData.tag.split(/\s+/).map(t => t.replace(/#/g, '').trim().toLowerCase()).filter(Boolean);
-        }
-
-        return {
-          id: id_noticia,
-          link: '',
-          time: new Date(event.created_at * 1000).toISOString(),
-          score: 10,
-          headline: title,
-          title: title,
-          hook: hook,
-          summary: summary,
-          tags: tags,
-          conteudo_blog: event.content
-        };
-      });
-
-      // No retention filter — generate permanent SEO pages for ALL articles.
-      // Homepage feed filtering (120h) is applied separately in the build step.
-      if (list.length === 0) {
-        reject(new Error('No articles found from Nostr relays.'));
-      } else {
-        resolve(list);
-      }
-    };
-
-    timeoutId = setTimeout(finish, CONFIG.timeoutMs);
-
-    const filter = {
-      authors: [CONFIG.author],
-      kinds: [1, 30023], // <-- ATUALIZADO: Aceitando notas simples e artigos longos
-      limit: 50
-    };
-    const subId = 'bbn_build_' + Math.random().toString(36).substring(2);
-    const reqMessage = JSON.stringify(['REQ', subId, filter]);
-
-    CONFIG.relays.forEach(url => {
-      try {
-        const ws = new WebSocket(url);
-        ws.on('open', () => ws.send(reqMessage));
-        ws.on('message', (data) => {
-          try {
-            const parsed = JSON.parse(data.toString());
-            if (parsed[0] === 'EVENT' && parsed[1] === subId) {
-              const ev = parsed[2];
-              if (!events.has(ev.id)) events.set(ev.id, ev);
-            } else if (parsed[0] === 'EOSE' && parsed[1] === subId) {
-              ws.close();
-            }
-          } catch (err) { /* ignore parse errors */ }
-        });
-        ws.on('close', () => {
-          relaysFinished++;
-          if (relaysFinished === CONFIG.relays.length) finish();
-        });
-        ws.on('error', () => ws.close());
-      } catch (err) {
-        relaysFinished++;
+  // Paginate to get all articles
+  while (true) {
+    const url = `${supabaseUrl}/rest/v1/${supabaseTable}?order=created_at.desc&limit=${pageSize}&offset=${from}&select=*`;
+    const res = await fetch(url, {
+      headers: {
+        'apikey': supabaseKey,
+        'Authorization': `Bearer ${supabaseKey}`,
+        'Content-Type': 'application/json'
       }
     });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Supabase fetch failed (${res.status}): ${errText}`);
+    }
+
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length === 0) break;
+
+    allRows = allRows.concat(rows);
+    if (rows.length < pageSize || allRows.length >= supabaseLimit) break;
+    from += pageSize;
+  }
+
+  if (allRows.length === 0) {
+    throw new Error('No articles found in Supabase.');
+  }
+
+  // Map Supabase columns to BBN article format
+  const list = allRows.map(row => {
+    const title = (row.headline || 'Untitled').replace(/\*\*/g, '').trim();
+    const content = row.content || row.article_lead || '';
+    const summary = row.summary || (content ? content.substring(0, 160).replace(/\n/g, ' ').trim() : '');
+    const hook = row.hook || '';
+    const score = row.score ? parseInt(row.score) : 7;
+    const time = row.created_at
+      ? new Date(row.created_at).toISOString()
+      : new Date().toISOString();
+
+    // Extract tags from content or headline using keywords
+    const tags = extractTagsFromContent(title, content);
+
+    return {
+      id: String(row.id),
+      link: '',
+      time,
+      score: isNaN(score) ? 7 : score,
+      headline: title,
+      title: title,
+      hook: hook,
+      summary: summary,
+      tags: tags,
+      conteudo_blog: content
+    };
   });
+
+  return list;
+}
+
+// ── Auto-tag articles based on keywords ──────────────────────
+function extractTagsFromContent(title, content) {
+  const text = `${title} ${content}`.toLowerCase();
+  const tagMap = [
+    ['bitcoin', ['bitcoin', 'btc', 'satoshi', 'lightning', 'taproot']],
+    ['crypto', ['crypto', 'cryptocurrency', 'blockchain', 'defi', 'web3', 'nft', 'altcoin', 'ethereum', 'eth']],
+    ['geopolitics', ['war', 'conflict', 'military', 'sanction', 'treaty', 'nato', 'invasion', 'missile', 'nuclear']],
+    ['economy', ['economy', 'gdp', 'inflation', 'recession', 'fed', 'federal reserve', 'interest rate', 'central bank', 'selic', 'ipca']],
+    ['markets', ['stock', 'market', 's&p', 'nasdaq', 'dow', 'etf', 'trading', 'commodity', 'gold', 'oil']],
+    ['regulation', ['regulation', 'sec', 'law', 'ban', 'policy', 'compliance', 'court', 'legal', 'ruling']],
+    ['brazil', ['brazil', 'brasil', 'lula', 'stf', 'banco central', 'haddad', 'brasília', 'selic']],
+    ['energy', ['energy', 'oil', 'gas', 'opec', 'petroleum', 'pipeline', 'renewables', 'nuclear']]
+  ];
+
+  const matched = [];
+  for (const [tag, keywords] of tagMap) {
+    if (keywords.some(kw => text.includes(kw))) {
+      matched.push(tag);
+    }
+    if (matched.length >= 4) break;
+  }
+
+  return matched.length > 0 ? matched : ['news'];
 }
 
 // ── Process articles into slugMap ──────────────────────────
@@ -345,14 +337,14 @@ async function build() {
     }
   }
 
-  // 1. Fetch articles from Nostr
-  console.log('⏳ Connecting to Nostr relays...');
+  // 1. Fetch articles from Supabase
+  console.log('⏳ Connecting to Supabase...');
   let fetchedArticles = [];
   try {
-    fetchedArticles = await fetchFromNostr();
-    console.log(`✅ Fetched ${fetchedArticles.length} articles from relays`);
+    fetchedArticles = await fetchFromSupabase();
+    console.log(`✅ Fetched ${fetchedArticles.length} articles from Supabase`);
   } catch (err) {
-    console.error(`❌ Failed to fetch articles: ${err.message}`);
+    console.error(`❌ Failed to fetch articles from Supabase: ${err.message}`);
     process.exit(1);
   }
 
@@ -424,6 +416,14 @@ async function build() {
   if (existsSync(favSrc)) {
     cpSync(favSrc, favDest, { force: true });
     console.log('📦 Copied favicon.ico');
+  }
+
+  // Copy robots.txt if it exists in public/
+  const robotsSrc = join(__dirname, 'public', 'robots.txt');
+  const robotsDest = join(DIST_DIR, 'robots.txt');
+  if (existsSync(robotsSrc)) {
+    cpSync(robotsSrc, robotsDest, { force: true });
+    console.log('📦 Copied robots.txt');
   }
 
   // Copy manifest.json if it exists
@@ -509,6 +509,11 @@ async function build() {
 `;
   writeFileSync(join(DIST_DIR, 'nginx.conf.example'), nginxSnippet, 'utf-8');
 
+  // 10. Generate sitemap.xml
+  const sitemapXml = generateSitemap(processed, CONFIG.baseUrl);
+  writeFileSync(join(DIST_DIR, 'sitemap.xml'), sitemapXml, 'utf-8');
+  console.log(`🗺️  Generated sitemap.xml (${processed.length + 2} URLs)`);
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log('');
   console.log(`✨ Build complete in ${elapsed}s`);
@@ -522,6 +527,48 @@ async function build() {
     console.log(`  /news/${post.slug}`);
   }
   console.log('');
+}
+
+// ── Generate sitemap.xml ────────────────────────────────
+function generateSitemap(articles, baseUrl) {
+  const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+  const staticPages = [
+    {
+      loc: `${baseUrl}/`,
+      changefreq: 'always',
+      priority: '1.0',
+      lastmod: now
+    },
+    {
+      loc: `${baseUrl}/archive`,
+      changefreq: 'daily',
+      priority: '0.8',
+      lastmod: now
+    }
+  ];
+
+  const articlePages = articles.map(post => ({
+    loc: `${baseUrl}/news/${post.slug}`,
+    changefreq: 'weekly',
+    priority: '0.7',
+    lastmod: post.time ? post.time.split('T')[0] : now
+  }));
+
+  const allPages = [...staticPages, ...articlePages];
+
+  const urlEntries = allPages.map(p => `
+  <url>
+    <loc>${p.loc}</loc>
+    <lastmod>${p.lastmod}</lastmod>
+    <changefreq>${p.changefreq}</changefreq>
+    <priority>${p.priority}</priority>
+  </url>`).join('');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">${urlEntries}
+</urlset>`;
 }
 
 build().catch(err => {

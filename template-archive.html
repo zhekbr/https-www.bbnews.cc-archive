@@ -23,13 +23,13 @@
   <link rel="canonical" href="{{BASE_URL}}/archive">
   <!-- Preconnects -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://relay.damus.io" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="preconnect" href="https://www.google-analytics.com">
   <link rel="preconnect" href="https://www.googletagmanager.com">
   <link rel="dns-prefetch" href="https://www.google-analytics.com">
-  <link
-    href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap"
-    rel="stylesheet">
+  <!-- Google Fonts: async non-blocking load -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap"></noscript>
   <!-- Favicon & Manifest -->
   <link rel="icon" href="/favicon.ico" type="image/x-icon">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
@@ -38,13 +38,18 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#F7931A">
   <link rel="stylesheet" href="/style.css?v=1.9">
-  <!-- Google Analytics 4 -->
-  <script async src="https://www.googletagmanager.com/gtag/js?id=G-WWVSBWXE1T"></script>
+  <!-- Google Analytics 4 (deferred) -->
   <script>
-    window.dataLayer = window.dataLayer || [];
-    function gtag(){dataLayer.push(arguments);}
-    gtag('js', new Date());
-    gtag('config', 'G-WWVSBWXE1T');
+    window.addEventListener('load', function() {
+      var s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=G-WWVSBWXE1T';
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-WWVSBWXE1T');
+    });
   </script>
 </head>
 
@@ -69,6 +74,7 @@
     <a href="/" onclick="event.preventDefault(); goHome()" class="nav-link">Home</a>
     <a href="/archive" onclick="event.preventDefault(); goArchive()" class="nav-link active">Archive</a>
   </nav>
+  <main id="main-content">
   <div class="ticker-wrap">
     <div class="ticker-belt" id="ticker-belt"></div>
   </div>
@@ -115,6 +121,7 @@
   <div id="page-article">
     <div class="article-wrap" id="article-container"></div>
   </div>
+  </main>
 
   <footer>
     <div class="footer-logo">BBN</div>
