@@ -989,22 +989,11 @@ async function init() {
         .slice(0, 60);
       populateRows(homepageNoticias);
 
-      // Detect if we are on the static /archive page (served from archive/index.html).
-      // On this page, build.mjs already pre-rendered the grid — never overwrite it.
-      // populateArchive() is only for dynamic navigation from the homepage.
-      const isStaticArchivePage = (
-        window.location.pathname === '/archive' ||
-        window.location.pathname === '/archive/' ||
-        window.location.pathname === '/archive/index.html'
-      );
+      // Always populate the archive grid with fresh Supabase data,
+      // whether the user landed directly on /archive or navigated via JS.
       const archiveGrid = document.getElementById('archive-grid');
-      if (archiveGrid && !isStaticArchivePage) {
-        // Dynamic path: user navigated here via JS — build archive from articles.json.
+      if (archiveGrid) {
         populateArchive(noticias);
-        buildFilters(noticias);
-      } else if (archiveGrid && isStaticArchivePage) {
-        // Static archive page: just wire up search/filter/pagination controls.
-        setupArchiveControls();
         buildFilters(noticias);
       }
     } else if (!isPreRendered) {
