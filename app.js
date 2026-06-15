@@ -1,10 +1,4 @@
-// --- CONFIGURAÇÃO NOSTR ---
-const NOSTR_RELAYS = [
-  'wss://relay.damus.io',
-  'wss://nos.lol',
-  'wss://relay.primal.net'
-];
-const NOSTR_AUTHOR = 'b5467ea20bac695e535859f72589c1429fabdff1518e939515314385ee6c1d50';
+// --- BBN Configuration ---
 
 const ROWS_COUNT = 3;
 const SKELETON_QTY = 4;
@@ -237,146 +231,35 @@ function routeFromURL() {
   showPage('page-home');
   document.title = 'BBN – Bitcoin Brasil News';
 }
-async function fetchNoticias() {
+async function loadArticles() {
   try {
     const res = await fetch('/articles.json');
-    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-    const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
-      data.forEach((row) => {
-        const content = row.conteudo_blog || row.headline;
-        const title = row.headline && row.headline !== 'Untitled' ? row.headline : extractTitle(content);
-        const body = extractBody(content, title);
-        let slug = toSlug(title);
-        if (slugMap[slug]) slug = `${slug}-${row.id}`;
-        const post = {
-          id: row.id,
-          title,
-          body,
-          slug,
-          link: row.link ?? ''
-        };
-        slugMap[slug] = post;
-        row._slug = slug;
-      });
-      return data;
+    if (!res.ok) throw new Error('Failed to load articles');
+    const articles = await res.json();
+    if (!Array.isArray(articles) || articles.length === 0) {
+      throw new Error('No articles found');
     }
-  } catch (err) {
-    console.warn('[BBN] Failed to fetch static articles.json, falling back to Nostr relays...', err);
-  }
-
-  return new Promise((resolve, reject) => {
-    const events = new Map();
-    let relaysFinished = 0;
-    let timeoutId;
-    
-    const finish = () => {
-      clearTimeout(timeoutId);
-      const list = Array.from(events.values()).map(event => {
-        const getTag = (name) => {
-          const t = event.tags.find(tag => tag[0] === name);
-          return t ? t[1] : '';
-        };
-        const title = (getTag('title') || 'Untitled').replace(/\*\*/g, '');
-        const hook = (getTag('hook') || '').replace(/\*\*/g, '');
-        const summary = (getTag('summary') || getTag('description') || (event.content ? event.content.substring(0, 120).replace(/^[#*\s]+/gm, '').replace(/\n/g, ' ').trim() + '...' : '')).replace(/\*\*/g, '');
-        const id_noticia = getTag('id_noticia') || event.id;
-        
-        let articleData = {};
-        try {
-          articleData = JSON.parse(event.content);
-        } catch(e) {}
-        
-        let tags = [];
-        if (event.tags) {
-          tags = event.tags
-            .filter(t => t[0] === 't')
-            .map(t => t[1].replace(/#/g, '').trim().toLowerCase())
-            .filter(Boolean);
-        }
-        if (tags.length === 0 && articleData.tag) {
-          tags = articleData.tag.split(/\s+/).map(t => t.replace(/#/g, '').trim().toLowerCase()).filter(Boolean);
-        }
-        
-        return {
-          id: id_noticia,
-          link: '',
-          time: new Date(event.created_at * 1000).toISOString(),
-          score: 10,
-          likes: 0,
-          dislikes: 0,
-          title: title,
-          headline: title,
-          hook: hook,
-          summary: summary,
-          tags: tags,
-          conteudo_blog: event.content
-        };
-      });
-      
-      list.sort((a, b) => new Date(b.time) - new Date(a.time));
-      const filtered = list;
-
-      filtered.forEach((row) => {
-        const content = row.conteudo_blog || row.headline;
-        const title = row.headline && row.headline !== 'Untitled' ? row.headline : extractTitle(content);
-        const body = extractBody(content, title);
-        let slug = toSlug(title);
-        if (slugMap[slug]) slug = `${slug}-${row.id}`;
-        const post = {
-          id: row.id,
-          title,
-          body,
-          slug,
-          link: row.link ?? ''
-        };
-        slugMap[slug] = post;
-        row._slug = slug;
-      });
-
-      if (filtered.length === 0) {
-        reject(new Error('No news found in the database.'));
-      } else {
-        resolve(filtered);
-      }
-    };
-
-    timeoutId = setTimeout(finish, 4000);
-
-    const filter = {
-      authors: [NOSTR_AUTHOR],
-      kinds: [30023],
-      limit: 50
-    };
-
-    const subId = "bbn_" + Math.random().toString(36).substring(2);
-    const reqMessage = JSON.stringify(["REQ", subId, filter]);
-
-    NOSTR_RELAYS.forEach(url => {
-      try {
-        const ws = new WebSocket(url);
-        ws.onopen = () => ws.send(reqMessage);
-        ws.onmessage = (e) => {
-          try {
-            const data = JSON.parse(e.data);
-            if (data[0] === "EVENT" && data[1] === subId) {
-              const ev = data[2];
-              if (!events.has(ev.id)) events.set(ev.id, ev);
-            } else if (data[0] === "EOSE" && data[1] === subId) {
-              ws.close();
-            }
-          } catch (err) {}
-        };
-        ws.onclose = () => {
-          relaysFinished++;
-          if (relaysFinished === NOSTR_RELAYS.length) finish();
-        };
-        ws.onerror = () => ws.close();
-      } catch (err) {
-        relaysFinished++;
-      }
+    articles.forEach((row) => {
+      const content = row.conteudo_blog || row.headline;
+      const title = row.headline && row.headline !== 'Untitled' ? row.headline : extractTitle(content);
+      const body = extractBody(content, title);
+      let slug = toSlug(title);
+      if (slugMap[slug]) slug = `${slug}-${row.id}`;
+      const post = {
+        id: row.id,
+        title,
+        body,
+        slug,
+        link: row.link ?? ''
+      };
+      slugMap[slug] = post;
+      row._slug = slug;
     });
-  });
+    return articles;
+  } catch (err) {
+    console.error('Failed to load articles.json:', err);
+    return [];
+  }
 }
 const esc = str =>
   String(str ?? '').replace(/[&<>"']/g, c =>
@@ -717,7 +600,7 @@ function showError(err) {
   for (let ri = 0; ri < 3; ri++) {
     const track = document.getElementById(`tr${ri}`);
     if (track) {
-      track.innerHTML = `<div style="padding:1.2rem;border:1.5px dashed #F7931A;color:#888;width:280px;font-size:0.7rem;"><strong style="color:#F7931A;display:block;">⚠ Connection Error</strong>Failed to fetch data from Nostr.</div>`;
+      track.innerHTML = `<div style="padding:1.2rem;border:1.5px dashed #F7931A;color:#888;width:280px;font-size:0.7rem;"><strong style="color:#F7931A;display:block;">⚠ Connection Error</strong>Failed to load articles. Please try again later.</div>`;
     }
   }
 }
@@ -769,13 +652,16 @@ function populateArchive(noticias) {
   const frag = document.createDocumentFragment();
 
   noticias.forEach(item => {
+    // Defensive: skip articles with missing critical fields
+    if (!item || !item.title || !item.time) return;
+
     const card = document.createElement('a');
     card.className = 'bbn-archive-row';
     card.href = `/news/${item._slug}`;
     
     // Set attributes for filtering
     card.dataset.time = item.time;
-    card.dataset.title = item.title.toLowerCase();
+    card.dataset.title = (item.title || '').toLowerCase();
     if (item.tags && item.tags.length > 0) {
       card.dataset.tags = item.tags.join(',');
     } else {
@@ -1039,13 +925,32 @@ async function init() {
   }
 
   try {
-    const noticias = await fetchNoticias();
-    populateTicker(noticias);
-    
-    const recentNoticias = noticias.filter(item => getAgeInHours(item.time) < 48);
-    populateRows(recentNoticias);
-    populateArchive(noticias);
-    buildFilters(noticias);
+    const noticias = await loadArticles();
+    if (noticias.length > 0) {
+      populateTicker(noticias);
+      // Show the most recent 60 articles on the homepage regardless of age.
+      // This prevents a blank homepage when the build pipeline hasn't run recently.
+      const homepageNoticias = [...noticias]
+        .sort((a, b) => new Date(b.time) - new Date(a.time))
+        .slice(0, 60);
+      populateRows(homepageNoticias);
+
+      // Check if archive grid is already pre-rendered by build.mjs (static HTML).
+      // If so, just activate the controls without overwriting the static grid.
+      const archiveGrid = document.getElementById('archive-grid');
+      const archiveIsPreRendered = archiveGrid && archiveGrid.children.length > 0;
+      if (archiveIsPreRendered) {
+        // Static grid already has the correct articles and slugs — just wire up controls.
+        setupArchiveControls();
+        buildFilters(noticias);
+      } else {
+        // Dynamic path (e.g. navigated from home via JS): build archive from articles.json.
+        populateArchive(noticias);
+        buildFilters(noticias);
+      }
+    } else if (!isPreRendered) {
+      showError(new Error('No articles available'));
+    }
 
     if (!isPreRendered || !window.location.pathname.startsWith('/news/')) {
       routeFromURL();
@@ -1056,7 +961,7 @@ async function init() {
     if (!isPreRendered) {
       showError(err);
     } else {
-      console.warn('[BBN] Nostr fetch failed on pre-rendered page — article still visible.', err.message);
+      console.warn('[BBN] Failed to load articles on pre-rendered page — article still visible.', err.message);
     }
   }
 }
@@ -1087,13 +992,21 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 setInterval(async () => {
-  console.log('[BBN] Updating terminal...');
+  console.log('[BBN] Refreshing articles...');
   try {
-    const noticias = await fetchNoticias();
-    populateTicker(noticias);
-    const recentNoticias = noticias.filter(item => getAgeInHours(item.time) < 48);
-    populateRows(recentNoticias);
-    populateArchive(noticias);
+    const noticias = await loadArticles();
+    if (noticias.length > 0) {
+      populateTicker(noticias);
+      const homepageNoticias = [...noticias]
+        .sort((a, b) => new Date(b.time) - new Date(a.time))
+        .slice(0, 60);
+      populateRows(homepageNoticias);
+      // Do not call populateArchive() if the static grid is already rendered.
+      const archiveGrid = document.getElementById('archive-grid');
+      if (archiveGrid && archiveGrid.children.length === 0) {
+        populateArchive(noticias);
+      }
+    }
   } catch (err) {
     console.warn('[BBN] Silent refresh failed:', err.message);
   }
