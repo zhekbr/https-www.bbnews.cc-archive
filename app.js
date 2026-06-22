@@ -402,7 +402,7 @@ function panelTemplate(item) {
         <div style="font-family:'IBM Plex Mono',monospace;font-size:0.52rem;color:#888;letter-spacing:0.1em;margin-bottom:0.15rem;">${dt}</div>
         <div class="panel-hook" style="font-family:'Sora',sans-serif;font-size:0.95rem;letter-spacing:normal;text-transform:none;line-height:1.3;">
           <strong style="color:#000;">${esc(item.headline)}</strong>
-          <div style="font-weight:400;font-size:0.78rem;color:#555;margin-top:0.15rem;line-height:1.4;">${esc(summaryText)}</div>
+          <div style="font-weight:400;font-size:0.78rem;color:#555;margin-top:0.15rem;line-height:1.4;">${inlineFormat(summaryText)}</div>
         </div>
       </div>
       <div class="panel-actions" style="margin-top:0.3rem;">
