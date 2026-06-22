@@ -481,6 +481,23 @@ async function build() {
   writeFileSync(join(archiveDir, 'index.html'), archiveHtml, 'utf-8');
   console.log(`📂 Generated archive pages (archive.html & archive/index.html)`);
 
+  // Generate privacy policy page
+  const privacyTemplate = readFileSync(join(__dirname, 'template-privacy.html'), 'utf-8');
+  let privacyHtml = privacyTemplate;
+  privacyHtml = privacyHtml.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
+  privacyHtml = privacyHtml.replace(/\?v=[0-9.]+/g, () => '?v=' + VERSION);
+
+  // Legacy support
+  writeFileSync(join(DIST_DIR, 'privacy.html'), privacyHtml, 'utf-8');
+
+  // Clean URL support /privacy
+  const privacyDir = join(DIST_DIR, 'privacy');
+  if (!existsSync(privacyDir)) {
+    mkdirSync(privacyDir, { recursive: true });
+  }
+  writeFileSync(join(privacyDir, 'index.html'), privacyHtml, 'utf-8');
+  console.log(`🔒 Generated privacy policy pages (privacy.html & privacy/index.html)`);
+
   // Export articles database for client consumption
   writeFileSync(join(DIST_DIR, 'articles.json'), JSON.stringify(mergedArticles), 'utf-8');
   console.log(`📂 Exported articles.json database`);
@@ -544,6 +561,12 @@ function generateSitemap(articles, baseUrl) {
       loc: `${baseUrl}/archive`,
       changefreq: 'daily',
       priority: '0.8',
+      lastmod: now
+    },
+    {
+      loc: `${baseUrl}/privacy`,
+      changefreq: 'yearly',
+      priority: '0.3',
       lastmod: now
     }
   ];
