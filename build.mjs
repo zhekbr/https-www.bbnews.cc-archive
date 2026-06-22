@@ -547,40 +547,26 @@ async function build() {
 }
 
 // ── Generate sitemap.xml ────────────────────────────────
+function escXml(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 function generateSitemap(articles, baseUrl) {
   const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
 
+  // Static pages — standard sitemap format
   const staticPages = [
-    {
-      loc: `${baseUrl}/`,
-      changefreq: 'always',
-      priority: '1.0',
-      lastmod: now
-    },
-    {
-      loc: `${baseUrl}/archive`,
-      changefreq: 'daily',
-      priority: '0.8',
-      lastmod: now
-    },
-    {
-      loc: `${baseUrl}/privacy`,
-      changefreq: 'yearly',
-      priority: '0.3',
-      lastmod: now
-    }
+    { loc: `${baseUrl}/`,        changefreq: 'always',  priority: '1.0', lastmod: now },
+    { loc: `${baseUrl}/archive`, changefreq: 'daily',   priority: '0.8', lastmod: now },
+    { loc: `${baseUrl}/privacy`, changefreq: 'yearly',  priority: '0.3', lastmod: now }
   ];
 
-  const articlePages = articles.map(post => ({
-    loc: `${baseUrl}/news/${post.slug}`,
-    changefreq: 'weekly',
-    priority: '0.7',
-    lastmod: post.time ? post.time.split('T')[0] : now
-  }));
-
-  const allPages = [...staticPages, ...articlePages];
-
-  const urlEntries = allPages.map(p => `
+  const staticEntries = staticPages.map(p => `
   <url>
     <loc>${p.loc}</loc>
     <lastmod>${p.lastmod}</lastmod>
@@ -588,9 +574,31 @@ function generateSitemap(articles, baseUrl) {
     <priority>${p.priority}</priority>
   </url>`).join('');
 
+  // Article pages — Google News sitemap format
+  const newsEntries = articles.map(post => {
+    const articleUrl = `${baseUrl}/news/${post.slug}`;
+    const pubDate = post.time || new Date().toISOString();
+    const lastmod = post.time ? post.time.split('T')[0] : now;
+    const title = escXml(post.title);
+
+    return `
+  <url>
+    <loc>${articleUrl}</loc>
+    <lastmod>${lastmod}</lastmod>
+    <news:news>
+      <news:publication>
+        <news:name>Bitcoin Brasil News</news:name>
+        <news:language>en</news:language>
+      </news:publication>
+      <news:publication_date>${pubDate}</news:publication_date>
+      <news:title>${title}</news:title>
+    </news:news>
+  </url>`;
+  }).join('');
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">${urlEntries}
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">${staticEntries}${newsEntries}
 </urlset>`;
 }
 
