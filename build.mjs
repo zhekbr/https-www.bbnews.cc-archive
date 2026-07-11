@@ -36,7 +36,7 @@ async function fetchFromSupabase() {
   let from = 0;
   const pageSize = 1000;
   // [M-04] Colunas explícitas em vez de select=* para evitar exposição de campos internos futuros
-  const cols = 'id,headline,content,article_lead,summary,hook,score,created_at,link';
+  const cols = 'id,headline,content,article_lead,summary,hook,created_at,link';
 
   // Paginate to get all articles
   while (true) {
@@ -72,7 +72,7 @@ async function fetchFromSupabase() {
     const content = row.content || row.article_lead || '';
     const summary = row.summary || (content ? content.substring(0, 160).replace(/\n/g, ' ').trim() : '');
     const hook = row.hook || '';
-    const score = row.score ? parseInt(row.score) : 7;
+    const score = 7; // column removed from Supabase; defaulting to 7
     const time = row.created_at
       ? new Date(row.created_at).toISOString()
       : new Date().toISOString();
