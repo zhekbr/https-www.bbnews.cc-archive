@@ -1,8 +1,6 @@
 # ==========================================
 # BITCOIN BRASIL NEWS (BBN) - CRAWLER POLICY
 # ==========================================
-
-# Permitir indexação total para os buscadores do Google
 User-agent: Googlebot
 Allow: /
 User-agent: Googlebot-News
@@ -10,17 +8,13 @@ Allow: /
 User-agent: Googlebot-Image
 Allow: /
 
-# Política Aberta para Agregadores e IAs (Perplexity, GPT, etc)
-# Queremos ser citados como fonte em respostas geradas por IA.
 User-agent: *
 Allow: /
 
-# Proteger caminhos sensíveis ou sem valor de SEO (Ajuste conforme o seu SSG)
 Disallow: /admin/
 Disallow: /api/
 Disallow: /_next/      
 Disallow: /assets/fonts/
 
-# Apontamentos Vitais
 Sitemap: https://bbnews.cc/sitemap.xml
 Sitemap: https://bbnews.cc/feed.xml
