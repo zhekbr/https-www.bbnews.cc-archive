@@ -1,9 +1,8 @@
-// --- BBN Configuration ---
-const SUPABASE_URL = 'https://thyibhsuhpxqexjvprct.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoeWliaHN1aHB4cWV4anZwcmN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1OTQ5MjAsImV4cCI6MjA5NjE3MDkyMH0._KQeNO86_wm4yzXEf_2T6GVNFazWdWl0n25Oq1jZtOI';
+// --- BBN Configuration (injetada pelo build SSG via window.__BBN_CONFIG__) ---
+const SUPABASE_URL = window.__BBN_CONFIG__?.url || '';
+const SUPABASE_ANON_KEY = window.__BBN_CONFIG__?.key || '';
 
 const ROWS_COUNT = 3;
-const SKELETON_QTY = 4;
 let activeCard = null;
 let slugMap = {};
 
@@ -98,10 +97,19 @@ function inlineFormat(text) {
     .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
 }
 
+// Garante que URLs de links externos não usem esquemas perigosos (ex: javascript:)
+function sanitizeUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim().toLowerCase();
+  if (trimmed.startsWith('javascript:') || trimmed.startsWith('data:') || trimmed.startsWith('vbscript:')) return '';
+  return url.trim();
+}
+
 function renderArticle(post) {
   const container = document.getElementById('article-container');
-  const sourceBtn = post.link
-    ? `<a class="article-source-btn" href="${esc(post.link)}" target="_blank" rel="noopener noreferrer">→ View original source</a>`
+  const safeLink = sanitizeUrl(post.link);
+  const sourceBtn = safeLink
+    ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">→ View original source</a>`
     : '';
 
   container.innerHTML = `
@@ -268,7 +276,9 @@ function processArticleRows(rows) {
 }
 
 async function fetchFromSupabase() {
-  const url = `${SUPABASE_URL}/rest/v1/articles?order=created_at.desc&limit=500&select=*`;
+  // [M-04] select=* substituído por colunas explícitas para evitar exposição de campos internos futuros
+  const cols = 'id,headline,content,article_lead,summary,hook,score,created_at,link';
+  const url = `${SUPABASE_URL}/rest/v1/articles?order=created_at.desc&limit=500&select=${cols}`;
   const res = await fetch(url, {
     headers: {
       'apikey': SUPABASE_ANON_KEY,
@@ -360,24 +370,6 @@ function formatRelativeTime(hours) {
   const days = Math.floor(hours / 24);
   return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
-function handleVote(event, newsId, type, btnEl) {
-  event.stopPropagation();
-  const votes = JSON.parse(localStorage.getItem('bbn_votes') || '{}');
-  if (votes[newsId]) return;
-  document.querySelectorAll(`.news-card[data-news-id="${newsId}"] .vote-btn`).forEach(b => b.disabled = true);
-  
-  votes[newsId] = type;
-  localStorage.setItem('bbn_votes', JSON.stringify(votes));
-  
-  document.querySelectorAll(`.news-card[data-news-id="${newsId}"]`).forEach(c => {
-    let countEl = c.querySelector(type === 'like' ? '.like-count' : '.dislike-count');
-    countEl.textContent = parseInt(countEl.textContent || '0') + 1;
-    c.querySelector('.like-btn').disabled = true;
-    c.querySelector('.dislike-btn').disabled = true;
-    c.querySelector('.like-btn').classList.toggle('voted', type === 'like');
-    c.querySelector('.dislike-btn').classList.toggle('voted', type === 'dislike');
-  });
-}
 function cardTemplate(item, votesMap) {
   const dataUS = new Date(item.time).toLocaleDateString('en-US');
   const ageHours = getAgeInHours(item.time);
@@ -460,7 +452,6 @@ function closePanel() {
   activeCard = null;
 }
 function populateRows(noticias) {
-  const ROWS_COUNT = 3;
   const votesMap = JSON.parse(localStorage.getItem('bbn_votes') || '{}');
   noticias.forEach(item => {
     const originalScore = parseFloat(item.score) || 6;
@@ -688,19 +679,6 @@ async function fetchBtcPrice() {
   } catch (err) {
     console.warn('[BBN BTC] Error fetching price:', err.message);
   }
-}
-
-function formatRelativeTime(hours) {
-  if (hours < 1) {
-    const mins = Math.round(hours * 60);
-    return mins <= 1 ? 'Just now' : `${mins} min ago`;
-  }
-  if (hours < 24) {
-    const h = Math.floor(hours);
-    return `${h} ${h === 1 ? 'hour' : 'hours'} ago`;
-  }
-  const days = Math.floor(hours / 24);
-  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
 }
 
 function populateArchive(noticias) {

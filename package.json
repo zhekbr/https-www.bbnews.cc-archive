@@ -8,10 +8,7 @@
     "preview": "npx serve dist"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "express": "^5.2.1",
-    "nostr-tools": "^2.23.5",
-    "ws": "^8.21.0"
+    "dotenv": "^17.4.2"
   },
   "devDependencies": {
     "serve": "^14.2.0"
