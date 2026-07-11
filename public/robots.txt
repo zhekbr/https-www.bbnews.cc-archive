@@ -2,3 +2,4 @@ User-agent: *
 Allow: /
 
 Sitemap: https://bbnews.cc/sitemap.xml
+Sitemap: https://bbnews.cc/feed.xml

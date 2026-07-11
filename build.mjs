@@ -35,10 +35,12 @@ async function fetchFromSupabase() {
   let allRows = [];
   let from = 0;
   const pageSize = 1000;
+  // [M-04] Colunas explícitas em vez de select=* para evitar exposição de campos internos futuros
+  const cols = 'id,headline,content,article_lead,summary,hook,score,created_at,link';
 
   // Paginate to get all articles
   while (true) {
-    const url = `${supabaseUrl}/rest/v1/${supabaseTable}?order=created_at.desc&limit=${pageSize}&offset=${from}&select=*`;
+    const url = `${supabaseUrl}/rest/v1/${supabaseTable}?order=created_at.desc&limit=${pageSize}&offset=${from}&select=${cols}`;
     const res = await fetch(url, {
       headers: {
         'apikey': supabaseKey,
@@ -153,6 +155,14 @@ function processArticles(articles) {
   return { slugMap, processed };
 }
 
+// Garante que URLs de links externos não usem esquemas perigosos (ex: javascript:)
+function sanitizeUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim().toLowerCase();
+  if (trimmed.startsWith('javascript:') || trimmed.startsWith('data:') || trimmed.startsWith('vbscript:')) return '';
+  return url.trim();
+}
+
 // ── Generate article HTML from template ────────────────────
 function generateArticlePage(post, template) {
   const description = post.summary || post.body.replace(/\n/g, ' ').slice(0, 160).trim();
@@ -160,8 +170,9 @@ function generateArticlePage(post, template) {
   const ogImage = CONFIG.baseUrl + CONFIG.defaultOgImage;
   const breadcrumb = esc(post.title.slice(0, 45)) + (post.title.length > 45 ? '…' : '');
   const articleBodyHtml = contentToHTML(post.body);
-  const sourceBtn = post.link
-    ? `<a class="article-source-btn" href="${esc(post.link)}" target="_blank" rel="noopener noreferrer">→ View original source</a>`
+  const safeLink = sanitizeUrl(post.link);
+  const sourceBtn = safeLink
+    ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">→ View original source</a>`
     : '';
 
   // Article category from first tag, fallback to "Notícias"
@@ -195,6 +206,12 @@ function generateArticlePage(post, template) {
     "inLanguage": "pt-BR"
   }, null, 4);
 
+  // [C-01] Config injetada no HTML para evitar hardcode no app.js
+  const bbnConfigArticle = JSON.stringify({
+    url: CONFIG.supabaseUrl,
+    key: CONFIG.supabaseKey
+  });
+
   let html = template;
   html = html.replace(/\{\{TITLE\}\}/g, () => esc(post.title));
   html = html.replace(/\{\{DESCRIPTION\}\}/g, () => esc(description));
@@ -209,6 +226,7 @@ function generateArticlePage(post, template) {
   html = html.replace(/\{\{ARTICLE_TITLE\}\}/g, () => esc(post.title));
   html = html.replace(/\{\{ARTICLE_BODY\}\}/g, () => articleBodyHtml);
   html = html.replace(/\{\{SOURCE_BUTTON\}\}/g, () => sourceBtn);
+  html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfigArticle);
 
   html = html.replace(/\?v=[0-9.]+/g, () => '?v=' + VERSION);
 
@@ -301,9 +319,16 @@ function generateHomePage(articles, template) {
     .map(a => `          <li><a href="/news/${a.slug}">${esc(a.title)}</a></li>`)
     .join('\n');
 
+  // [C-01] Config injetada no HTML para evitar hardcode no app.js (que fica no git)
+  const bbnConfig = JSON.stringify({
+    url: CONFIG.supabaseUrl,
+    key: CONFIG.supabaseKey
+  });
+
   let html = template;
   html = html.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
   html = html.replace(/\{\{ARTICLE_INDEX\}\}/g, () => articleIndex);
+  html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfig);
 
   html = html.replace(/\?v=[0-9.]+/g, () => '?v=' + VERSION);
 
@@ -462,8 +487,10 @@ async function build() {
 
   // Generate archive page (archive.html and archive/index.html for clean URLs)
   const archiveTemplate = readFileSync(join(__dirname, 'template-archive.html'), 'utf-8');
+  const bbnConfig = JSON.stringify({ url: CONFIG.supabaseUrl, key: CONFIG.supabaseKey });
   let archiveHtml = archiveTemplate;
   archiveHtml = archiveHtml.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
+  archiveHtml = archiveHtml.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfig);
   const archiveFiltersHtml = generateFiltersHtml(processed);
   archiveHtml = archiveHtml.replace(/\{\{FILTERS\}\}/g, () => archiveFiltersHtml);
   const archiveGridHtml = generateArchiveGrid(processed);
@@ -526,10 +553,15 @@ async function build() {
 `;
   writeFileSync(join(DIST_DIR, 'nginx.conf.example'), nginxSnippet, 'utf-8');
 
-  // 10. Generate sitemap.xml
+  // 10. Generate sitemap.xml (Google News + Image namespaces)
   const sitemapXml = generateSitemap(processed, CONFIG.baseUrl);
   writeFileSync(join(DIST_DIR, 'sitemap.xml'), sitemapXml, 'utf-8');
-  console.log(`🗺️  Generated sitemap.xml (${processed.length + 2} URLs)`);
+  console.log(`🗺️  Generated sitemap.xml (${processed.length + 3} URLs — news + image namespace)`);
+
+  // 11. Generate RSS 2.0 feed (feed.xml)
+  const rssFeed = generateRssFeed(processed, CONFIG.baseUrl);
+  writeFileSync(join(DIST_DIR, 'feed.xml'), rssFeed, 'utf-8');
+  console.log(`📡 Generated feed.xml (${processed.length} items — RFC 822 / WebSub-ready)`);
 
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
   console.log('');
@@ -546,9 +578,18 @@ async function build() {
   console.log('');
 }
 
-// ── Generate sitemap.xml ────────────────────────────────
+// ── XML helpers ─────────────────────────────────────────────
+
+/**
+ * Escape all XML special characters. Also strips ASCII control chars
+ * (U+0000–U+001F except tab, LF, CR) which are illegal in XML 1.0
+ * and will cause Google Search Console to reject the file.
+ */
 function escXml(str) {
   return String(str ?? '')
+    // Strip illegal XML 1.0 control characters (keep \t \n \r)
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -556,10 +597,68 @@ function escXml(str) {
     .replace(/'/g, '&apos;');
 }
 
+/**
+ * Convert a Date object to a strict RFC 822 string.
+ * Format: Ddd, DD Mon YYYY HH:MM:SS GMT
+ * This is required by RSS 2.0 / <pubDate>.
+ */
+function toRfc822(date) {
+  const days  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const d = new Date(date);
+  const pad = n => String(n).padStart(2, '0');
+  return `${days[d.getUTCDay()]}, ${pad(d.getUTCDate())} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} GMT`;
+}
+
+/**
+ * Detect financial ticker symbols that are likely present in the article.
+ * Returns a comma-separated string of relevant tickers, or empty string.
+ */
+function detectTickers(title, tags) {
+  const text = `${title} ${(tags || []).join(' ')}`.toLowerCase();
+  const tickers = [];
+
+  // Crypto tickers
+  if (/\bbitcoin\b|\bbtc\b/.test(text))     tickers.push('CRYPTO:BTC');
+  if (/\bethereum\b|\beth\b/.test(text))    tickers.push('CRYPTO:ETH');
+  if (/\bsolana\b|\bsol\b/.test(text))     tickers.push('CRYPTO:SOL');
+  if (/\bripple\b|\bxrp\b/.test(text))     tickers.push('CRYPTO:XRP');
+  if (/\bcardano\b|\bada\b/.test(text))    tickers.push('CRYPTO:ADA');
+  if (/\bdogecoin\b|\bdoge\b/.test(text))  tickers.push('CRYPTO:DOGE');
+  if (/\bbnb\b|\bbinance coin\b/.test(text)) tickers.push('CRYPTO:BNB');
+
+  // Equity / ETF tickers
+  if (/\bmicrostrategy\b|\bmstr\b/.test(text))  tickers.push('NASDAQ:MSTR');
+  if (/\bcoinbase\b|\bcoin\b/.test(text))        tickers.push('NASDAQ:COIN');
+  if (/\bapple\b|\baapl\b/.test(text))           tickers.push('NASDAQ:AAPL');
+  if (/\btesla\b|\btsla\b/.test(text))           tickers.push('NASDAQ:TSLA');
+  if (/\bspot bitcoin etf\b|\bbitcoin etf\b|\bibit\b/.test(text)) tickers.push('NASDAQ:IBIT');
+  if (/\bs&p 500\b|\bsp500\b/.test(text))        tickers.push('INDEXSP:.INX');
+
+  // Commodities
+  if (/\bgold\b/.test(text))  tickers.push('COMMODITY:XAUUSD');
+  if (/\bsilver\b/.test(text)) tickers.push('COMMODITY:XAGUSD');
+  if (/\boil\b|\bopec\b|\bpetroleum\b/.test(text)) tickers.push('COMMODITY:USOIL');
+
+  return tickers.join(',');
+}
+
+// ── Generate sitemap.xml ─────────────────────────────────────
+/**
+ * Generates a premium SEO sitemap conforming to:
+ *   - https://www.sitemaps.org/schemas/sitemap/0.9
+ *   - https://www.google.com/schemas/sitemap-news/0.9
+ *   - https://www.google.com/schemas/sitemap-image/1.1
+ *
+ * Each article URL block contains:
+ *   <image:image>  → cover image for Google Images
+ *   <news:news>    → full Google News block with keywords & stock tickers
+ */
 function generateSitemap(articles, baseUrl) {
   const now = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const defaultImage = `${baseUrl}/assets/og-default.png`;
 
-  // Static pages — standard sitemap format
+  // Static pages — standard sitemap entries (no news: block)
   const staticPages = [
     { loc: `${baseUrl}/`,        changefreq: 'always',  priority: '1.0', lastmod: now },
     { loc: `${baseUrl}/archive`, changefreq: 'daily',   priority: '0.8', lastmod: now },
@@ -574,17 +673,32 @@ function generateSitemap(articles, baseUrl) {
     <priority>${p.priority}</priority>
   </url>`).join('');
 
-  // Article pages — Google News sitemap format
+  // Article pages — Google News + Image sitemap entries
   const newsEntries = articles.map(post => {
-    const articleUrl = `${baseUrl}/news/${post.slug}`;
-    const pubDate = post.time || new Date().toISOString();
-    const lastmod = post.time ? post.time.split('T')[0] : now;
-    const title = escXml(post.title);
+    const articleUrl  = `${baseUrl}/news/${post.slug}`;
+    const pubDate     = post.time ? new Date(post.time).toISOString() : new Date().toISOString();
+    const lastmod     = pubDate.split('T')[0];
+    const title       = escXml(post.title);
+    const imageUrl    = defaultImage; // All articles share the OG default; swap with per-article URL when available
+    const imageTitle  = title;
+
+    // keywords: up to 10 tags, comma-separated
+    const keywords    = escXml((post.tags || []).slice(0, 10).join(', '));
+
+    // stock tickers: auto-detected from title + tags
+    const tickers     = detectTickers(post.title, post.tags);
+    const tickerBlock = tickers
+      ? `\n      <news:stock_tickers>${escXml(tickers)}</news:stock_tickers>`
+      : '';
 
     return `
   <url>
     <loc>${articleUrl}</loc>
     <lastmod>${lastmod}</lastmod>
+    <image:image>
+      <image:loc>${imageUrl}</image:loc>
+      <image:title>${imageTitle}</image:title>
+    </image:image>
     <news:news>
       <news:publication>
         <news:name>Bitcoin Brasil News</news:name>
@@ -592,14 +706,81 @@ function generateSitemap(articles, baseUrl) {
       </news:publication>
       <news:publication_date>${pubDate}</news:publication_date>
       <news:title>${title}</news:title>
+      <news:keywords>${keywords}</news:keywords>${tickerBlock}
     </news:news>
   </url>`;
   }).join('');
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
-        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9">${staticEntries}${newsEntries}
+        xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">${staticEntries}${newsEntries}
 </urlset>`;
+}
+
+// ── Generate RSS 2.0 feed (feed.xml) ─────────────────────────
+/**
+ * Generates a valid RSS 2.0 feed for WebSub / Google Discover / aggregators.
+ *
+ * Spec references:
+ *   - RSS 2.0: https://www.rssboard.org/rss-specification
+ *   - RFC 822 dates: required for <pubDate>
+ *   - <enclosure>: used for cover images (Google Discover picks these up)
+ */
+function generateRssFeed(articles, baseUrl) {
+  const buildDate   = toRfc822(new Date());
+  const defaultImage = `${baseUrl}/assets/og-default.png`;
+  // Rough JPEG byte estimate for the default OG image; actual size TBD.
+  // Set to 0 to let validators infer length from response headers.
+  const DEFAULT_IMAGE_BYTES = 0;
+
+  const items = articles.map(post => {
+    const articleUrl = `${baseUrl}/news/${post.slug}`;
+    const pubDate    = toRfc822(new Date(post.time || Date.now()));
+
+    // Summary / description — strip any residual Markdown and XML-escape
+    const rawDesc = post.summary || post.hook || post.body?.slice(0, 280) || post.title;
+    const description = escXml(rawDesc.replace(/\*\*/g, '').replace(/\*/g, '').trim());
+
+    // Cover image enclosure — all articles use the default OG image;
+    // replace imageUrl with a per-article cover URL when your pipeline provides one.
+    const imageUrl    = defaultImage;
+    const enclosure   = `<enclosure url="${imageUrl}" length="${DEFAULT_IMAGE_BYTES}" type="image/jpeg" />`;
+
+    // Categories from tags
+    const categoryTags = (post.tags || []).map(t => `<category>${escXml(t)}</category>`).join('\n        ');
+
+    return `
+    <item>
+      <title>${escXml(post.title)}</title>
+      <link>${articleUrl}</link>
+      <guid isPermaLink="true">${articleUrl}</guid>
+      <pubDate>${pubDate}</pubDate>
+      <description>${description}</description>
+      ${enclosure}
+      ${categoryTags}
+    </item>`;
+  }).join('');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:atom="http://www.w3.org/2005/Atom"
+     xmlns:media="http://search.yahoo.com/mrss/">
+  <channel>
+    <title>Bitcoin Brasil News</title>
+    <link>${baseUrl}</link>
+    <description>Real-time Bitcoin, crypto, and global financial news curated for investors worldwide.</description>
+    <language>en</language>
+    <lastBuildDate>${buildDate}</lastBuildDate>
+    <ttl>15</ttl>
+    <image>
+      <url>${baseUrl}/assets/og-default.png</url>
+      <title>Bitcoin Brasil News</title>
+      <link>${baseUrl}</link>
+    </image>
+    <atom:link href="${baseUrl}/feed.xml" rel="self" type="application/rss+xml" />${items}
+  </channel>
+</rss>`;
 }
 
 build().catch(err => {
