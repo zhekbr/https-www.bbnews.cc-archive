@@ -277,7 +277,7 @@ function processArticleRows(rows) {
 
 async function fetchFromSupabase() {
   // [M-04] select=* substituído por colunas explícitas para evitar exposição de campos internos futuros
-  const cols = 'id,headline,content,article_lead,summary,hook,score,created_at,link';
+  const cols = 'id,headline,content,article_lead,summary,hook,created_at,link';
   const url = `${SUPABASE_URL}/rest/v1/articles?order=created_at.desc&limit=500&select=${cols}`;
   const res = await fetch(url, {
     headers: {
@@ -299,7 +299,7 @@ async function fetchFromSupabase() {
       conteudo_blog: row.content || row.article_lead || '',
       summary: row.summary || '',
       hook: row.hook || '',
-      score: row.score ? parseInt(row.score) : 7,
+      score: 7, // column removed from Supabase; defaulting to 7
       time: row.created_at || new Date().toISOString(),
       link: '',
       tags: clientExtractTags(row.headline || '', row.content || '')
