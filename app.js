@@ -213,6 +213,19 @@ function goArticle(slug) {
 
 function routeFromURL() {
   const path = window.location.pathname;
+
+  // Static standalone pages — app.js is loaded but these pages render their
+  // own content; returning early prevents the SPA router from redirecting
+  // back to "/" when page-home doesn't exist in the current DOM.
+  if (
+    path === '/privacy' ||
+    path === '/privacy/' ||
+    path === '/privacy/index.html' ||
+    path === '/privacy.html'
+  ) {
+    return;
+  }
+
   if (
     path === '/archive' ||
     path === '/archive/' ||
