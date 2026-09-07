@@ -162,9 +162,11 @@ function showPage(pageId) {
   const navLinks = document.querySelectorAll('.nav-link');
   navLinks.forEach(link => {
     const href = link.getAttribute('href');
-    if (pageId === 'page-home' && href === '/') {
+    const isHome = href === '/' || href === '/en/' || href === '/pt/';
+    const isArchive = href === '/archive' || href === '/en/archive' || href === '/pt/archive';
+    if (pageId === 'page-home' && isHome) {
       link.classList.add('active');
-    } else if (pageId === 'page-archive' && href === '/archive') {
+    } else if (pageId === 'page-archive' && isArchive) {
       link.classList.add('active');
     } else {
       link.classList.remove('active');
@@ -172,6 +174,7 @@ function showPage(pageId) {
   });
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
+}
 function getCurrentLocale() {
   const path = window.location.pathname;
   if (path.startsWith('/pt') || path.startsWith('/pt/')) return 'pt';
