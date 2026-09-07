@@ -542,23 +542,24 @@ function parseLocalizedArticles(rawArticles) {
     }
   });
 
-  // Second pass: link posts if translation_of / pair_id matches or same ID exists
+  // Second pass: link posts if translation_of / pair_id matches, same ID exists, or timestamp proximity
   enPosts.forEach(post => {
     if (!post.translation) {
       const byPair = post.pairId ? ptById.get(String(post.pairId)) : null;
       const byId = ptById.get(String(post.id));
-      const counterpart = byPair || byId;
-      if (counterpart) {
-        post.translation = counterpart;
-        counterpart.translation = post;
+      let counterpart = byPair || byId;
+
+      if (!counterpart && post.time) {
+        const postTime = new Date(post.time).getTime();
+        counterpart = ptPosts.find(pt => {
+          if (!pt.translation && pt.time) {
+            const diff = Math.abs(postTime - new Date(pt.time).getTime());
+            return diff < 120000; // within 2 minutes
+          }
+          return false;
+        });
       }
-    }
-  });
-  ptPosts.forEach(post => {
-    if (!post.translation) {
-      const byPair = post.pairId ? enById.get(String(post.pairId)) : null;
-      const byId = enById.get(String(post.id));
-      const counterpart = byPair || byId;
+
       if (counterpart) {
         post.translation = counterpart;
         counterpart.translation = post;
