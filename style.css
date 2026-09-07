@@ -137,6 +137,40 @@ header {
   50% { color: var(--orange); text-shadow: 0 0 10px var(--orange); }
   100% { color: var(--orange); text-shadow: none; }
 }
+/* Language Switcher */
+.lang-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #111;
+  border: 1px solid rgba(247, 147, 26, 0.4);
+  border-radius: 2px;
+  padding: 3px 8px;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.1em;
+}
+.lang-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.15s ease;
+  padding: 1px 3px;
+  border-radius: 2px;
+}
+.lang-link:hover {
+  color: var(--white);
+}
+.lang-link.active {
+  color: var(--orange);
+  font-weight: 700;
+  background: rgba(247, 147, 26, 0.12);
+}
+.lang-sep {
+  color: #555;
+  font-size: 0.6rem;
+  user-select: none;
+}
 .btc-widget {
   display: inline-flex;
   align-items: center;

@@ -1,26 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{HTML_LANG}}">
 
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Arquivo de Notícias | BBN – Bitcoin Brasil News</title>
-  <meta name="description" content="Arquivo completo de todas as notícias publicadas pelo BBN – Bitcoin Brasil News. Busque e filtre por Bitcoin, mercado, e geopolítica.">
-  <meta property="og:title" content="Arquivo de Notícias | BBN – Bitcoin Brasil News">
-  <meta property="og:description" content="Arquivo completo de todas as notícias publicadas pelo BBN – Bitcoin Brasil News. Busque e filtre por Bitcoin, mercado, e geopolítica.">
+  <title>{{PAGE_TITLE}}</title>
+  <meta name="description" content="{{PAGE_DESCRIPTION}}">
+  <meta property="og:title" content="{{PAGE_TITLE}}">
+  <meta property="og:description" content="{{PAGE_DESCRIPTION}}">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="{{BASE_URL}}/archive">
+  <meta property="og:url" content="{{CANONICAL_URL}}">
   <meta property="og:image" content="{{BASE_URL}}/assets/og-default.png">
   <meta property="og:site_name" content="BBN – Bitcoin Brasil News">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Arquivo de Notícias | BBN – Bitcoin Brasil News">
-  <meta name="twitter:description" content="Arquivo completo de todas as notícias publicadas pelo BBN – Bitcoin Brasil News. Busque e filtre por Bitcoin, mercado, e geopolítica.">
+  <meta name="twitter:title" content="{{PAGE_TITLE}}">
+  <meta name="twitter:description" content="{{PAGE_DESCRIPTION}}">
   <meta name="twitter:image" content="{{BASE_URL}}/assets/og-default.png">
   <!-- Authorship & Robots -->
   <meta name="author" content="BBN – Bitcoin Brasil News">
   <meta name="publisher" content="BBN – Bitcoin Brasil News">
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
-  <link rel="canonical" href="{{BASE_URL}}/archive">
+  <link rel="canonical" href="{{CANONICAL_URL}}">
+  {{HREFLANG_TAGS}}
   <!-- Preconnects -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -60,7 +61,14 @@
       <div class="logo-eyebrow">Bitcoin Brasil News</div>
     </div>
     <div class="header-meta">
-      <div class="live-badge"><span class="live-dot"></span>Live</div>
+      <div class="header-tools" style="display:flex;align-items:center;gap:8px;">
+        <div class="lang-switcher">
+          <a href="{{LANG_EN_URL}}" class="lang-link{{LANG_EN_ACTIVE}}" title="English">EN</a>
+          <span class="lang-sep">|</span>
+          <a href="{{LANG_PT_URL}}" class="lang-link{{LANG_PT_ACTIVE}}" title="Português">PT</a>
+        </div>
+        <div class="live-badge"><span class="live-dot"></span>Live</div>
+      </div>
       <a id="btc-blofin-widget" class="btc-widget" href="https://blofin.com/register?referral_code=LEOAci"
         target="_blank" rel="noopener noreferrer" title="Open an account on BloFin">
         <span class="btc-label">BTC/USDT</span>
@@ -71,8 +79,8 @@
     </div>
   </header>
   <nav class="nav-bar">
-    <a href="/" onclick="event.preventDefault(); goHome()" class="nav-link">Home</a>
-    <a href="/archive" onclick="event.preventDefault(); goArchive()" class="nav-link active">Archive</a>
+    <a href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()" class="nav-link">{{NAV_HOME_TEXT}}</a>
+    <a href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()" class="nav-link active">{{NAV_ARCHIVE_TEXT}}</a>
   </nav>
   <main id="main-content">
   <div class="ticker-wrap">
@@ -82,26 +90,26 @@
   <div id="page-archive" class="active">
     <div class="archive-wrap">
       <div class="article-breadcrumb">
-        <a class="breadcrumb-home" href="/" onclick="event.preventDefault(); goHome()">BBN</a>
+        <a class="breadcrumb-home" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">BBN</a>
         <span>›</span>
-        <span>Archive</span>
+        <span>{{NAV_ARCHIVE_TEXT}}</span>
       </div>
       
       <div class="archive-header-row" style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:1.5rem;flex-wrap:wrap;gap:1rem;">
-        <div class="section-label" style="padding-left:0;margin-bottom:0;">── News Archive</div>
-        <div class="archive-counter" style="font-family:'IBM Plex Mono',monospace;font-size:0.8rem;color:var(--muted);"><span id="archive-count-num" style="color:var(--primary);font-weight:600;">0</span> articles published</div>
+        <div class="section-label" style="padding-left:0;margin-bottom:0;">── {{ARCHIVE_HEADING}}</div>
+        <div class="archive-counter" style="font-family:'IBM Plex Mono',monospace;font-size:0.8rem;color:var(--muted);"><span id="archive-count-num" style="color:var(--primary);font-weight:600;">0</span> {{ARTICLES_PUBLISHED_TEXT}}</div>
       </div>
 
       <div class="archive-controls" style="display:flex;gap:1rem;margin-bottom:1.5rem;flex-wrap:wrap;">
         <div class="search-box-wrap" style="flex:1;min-width:250px;position:relative;">
-          <input type="text" id="archive-search" placeholder="Search news by title..." class="archive-search-input" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;transition:border-color 0.2s;">
+          <input type="text" id="archive-search" placeholder="{{SEARCH_PLACEHOLDER}}" class="archive-search-input" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;transition:border-color 0.2s;">
         </div>
         <div class="filter-dropdown-wrap" style="width:180px;">
           <select id="archive-period" class="archive-select" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;cursor:pointer;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5%201.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');background-repeat:no-repeat;background-position:right%201rem%20center;background-size:0.65rem%20auto;padding-right:2.5rem;">
-            <option value="all">All Time</option>
-            <option value="today">Today</option>
-            <option value="week">This Week</option>
-            <option value="month">This Month</option>
+            <option value="all">{{PERIOD_ALL_TIME}}</option>
+            <option value="today">{{PERIOD_TODAY}}</option>
+            <option value="week">{{PERIOD_WEEK}}</option>
+            <option value="month">{{PERIOD_MONTH}}</option>
           </select>
         </div>
       </div>
@@ -113,7 +121,7 @@
 {{ARCHIVE_GRID}}
       </div>
       <div style="margin-top:3rem;display:flex;justify-content:center;">
-        <a class="article-back-btn" href="/" onclick="event.preventDefault(); goHome()">← Voltar para a Início</a>
+        <a class="article-back-btn" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">← {{BACK_TO_HOME_TEXT}}</a>
       </div>
     </div>
   </div>
@@ -125,7 +133,7 @@
 
   <footer>
     <div class="footer-logo">BBN</div>
-    <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; Updated daily &nbsp;·&nbsp; © 2025 &nbsp;·&nbsp; <a href="/privacy" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">Privacy Policy</a></div>
+    <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; {{FOOTER_UPDATED}} &nbsp;·&nbsp; © 2025–2026 &nbsp;·&nbsp; <a href="{{FOOTER_PRIVACY_URL}}" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">{{FOOTER_PRIVACY_TEXT}}</a></div>
   </footer>
   <script>window.__BBN_CONFIG__ = {{BBN_CONFIG}};</script>
   <script src="/app.js?v=1.19" defer></script>

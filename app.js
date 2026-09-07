@@ -172,33 +172,44 @@ function showPage(pageId) {
   });
 
   window.scrollTo({ top: 0, behavior: 'smooth' });
+function getCurrentLocale() {
+  const path = window.location.pathname;
+  if (path.startsWith('/pt') || path.startsWith('/pt/')) return 'pt';
+  if (path.startsWith('/en') || path.startsWith('/en/')) return 'en';
+  if (document.documentElement.lang && document.documentElement.lang.startsWith('pt')) return 'pt';
+  return 'en';
 }
 
 function goHome() {
+  const locale = getCurrentLocale();
+  const targetUrl = `/${locale}/`;
   if (!document.getElementById('page-home')) {
-    window.location.href = '/';
+    window.location.href = targetUrl;
     return;
   }
-  try { history.pushState(null, '', '/'); } catch (e) { window.location.href = '/'; return; }
+  try { history.pushState(null, '', targetUrl); } catch (e) { window.location.href = targetUrl; return; }
   showPage('page-home');
-  document.title = 'BBN – Bitcoin Brasil News';
+  document.title = locale === 'pt' ? 'BBN – Bitcoin Brasil News | Cripto, Mercado e Geopolítica' : 'BBN – Bitcoin Brasil News | Crypto, Markets & Geopolitics';
   closePanel();
 }
 
 function goArchive() {
+  const locale = getCurrentLocale();
+  const targetUrl = `/${locale}/archive`;
   if (!document.getElementById('page-archive')) {
-    window.location.href = '/archive';
+    window.location.href = targetUrl;
     return;
   }
-  try { history.pushState(null, '', '/archive'); } catch (e) { window.location.href = '/archive'; return; }
+  try { history.pushState(null, '', targetUrl); } catch (e) { window.location.href = targetUrl; return; }
   showPage('page-archive');
-  document.title = 'Arquivo de Notícias | BBN – Bitcoin Brasil News';
+  document.title = locale === 'pt' ? 'Arquivo de Notícias | BBN – Bitcoin Brasil News' : 'News Archive | BBN – Bitcoin Brasil News';
   closePanel();
 }
 
 function goArticle(slug) {
+  const locale = getCurrentLocale();
   const post = slugMap[slug];
-  const url = `/news/${slug}`;
+  const url = `/${locale}/news/${slug}`;
   try { history.pushState(null, '', url); } catch (e) { window.location.href = url; }
 
   if (!post) {
@@ -213,46 +224,47 @@ function goArticle(slug) {
 
 function routeFromURL() {
   const path = window.location.pathname;
+  const locale = getCurrentLocale();
 
   // Static standalone pages — app.js is loaded but these pages render their
-  // own content; returning early prevents the SPA router from redirecting
-  // back to "/" when page-home doesn't exist in the current DOM.
+  // own content; returning early prevents the SPA router from redirecting.
   if (
-    path === '/privacy' ||
-    path === '/privacy/' ||
-    path === '/privacy/index.html' ||
-    path === '/privacy.html'
+    path === '/privacy' || path === '/privacy/' || path === '/privacy/index.html' || path === '/privacy.html' ||
+    path === '/en/privacy' || path === '/en/privacy/' || path === '/en/privacy/index.html' || path === '/en/privacy.html' ||
+    path === '/pt/privacy' || path === '/pt/privacy/' || path === '/pt/privacy/index.html' || path === '/pt/privacy.html'
   ) {
     return;
   }
 
   if (
-    path === '/archive' ||
-    path === '/archive/' ||
-    path === '/archive/index.html' ||
-    path === '/archive.html' ||
-    path === '/mais-noticias' ||
-    path === '/mais-noticias/'
+    path === '/archive' || path === '/archive/' || path === '/archive/index.html' || path === '/archive.html' ||
+    path === '/en/archive' || path === '/en/archive/' || path === '/en/archive/index.html' || path === '/en/archive.html' ||
+    path === '/pt/archive' || path === '/pt/archive/' || path === '/pt/archive/index.html' || path === '/pt/archive.html' ||
+    path === '/mais-noticias' || path === '/mais-noticias/'
   ) {
     goArchive();
     return;
   }
-  const articleMatch = path.match(/^\/news\/(.+?)(?:\/)?$/);
+
+  // Localized and legacy article URLs
+  const articleMatch = path.match(/^(?:\/(?:en|pt))?\/news\/(.+?)(?:\/|\.html)?$/);
   if (articleMatch) {
     goArticle(articleMatch[1]);
     return;
   }
-  // Legacy hash routing support (redirect to clean URL)
+
+  // Legacy hash routing support (redirect to localized clean URL)
   const hash = window.location.hash;
-  const hashMatch = hash.match(/^#\/news\/(.+)$/);
+  const hashMatch = hash.match(/^#\/(?:(?:en|pt)\/)?news\/(.+)$/);
   if (hashMatch) {
     const slug = hashMatch[1];
-    history.replaceState(null, '', `/news/${slug}`);
+    history.replaceState(null, '', `/${locale}/news/${slug}`);
     goArticle(slug);
     return;
   }
+
   showPage('page-home');
-  document.title = 'BBN – Bitcoin Brasil News';
+  document.title = locale === 'pt' ? 'BBN – Bitcoin Brasil News | Cripto, Mercado e Geopolítica' : 'BBN – Bitcoin Brasil News | Crypto, Markets & Geopolitics';
 }
 function clientExtractTags(title, content) {
   const text = `${title} ${content}`.toLowerCase();
@@ -412,8 +424,8 @@ function panelTemplate(item) {
       </div>
       <div class="panel-actions" style="margin-top:0.3rem;">
         <a class="panel-btn btn-primary"
-           href="/news/${item._slug}" onclick="event.preventDefault(); goArticle('${item._slug}')">→ Read full article</a>
-        <button class="panel-btn btn-ghost" onclick="closePanel()">✕ Close</button>
+           href="/${getCurrentLocale()}/news/${item._slug}" onclick="event.preventDefault(); goArticle('${item._slug}')">${getCurrentLocale() === 'pt' ? '→ Ler artigo completo' : '→ Read full article'}</a>
+        <button class="panel-btn btn-ghost" onclick="closePanel()">${getCurrentLocale() === 'pt' ? '✕ Fechar' : '✕ Close'}</button>
       </div>
     </div>
   `;
@@ -707,7 +719,7 @@ function populateArchive(noticias) {
 
     const card = document.createElement('a');
     card.className = 'bbn-archive-row';
-    card.href = `/news/${item._slug}`;
+    card.href = `/${getCurrentLocale()}/news/${item._slug}`;
     
     // Set attributes for filtering
     card.dataset.time = item.time;
@@ -960,15 +972,21 @@ function buildFilters(noticias) {
 async function init() {
   const now = new Date();
   const dateDisplay = document.getElementById('date-display');
+  const locale = getCurrentLocale();
   if (dateDisplay) {
-    dateDisplay.textContent = now.toLocaleDateString('en-US', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+    dateDisplay.textContent = now.toLocaleDateString(locale === 'pt' ? 'pt-BR' : 'en-US', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
   }
   fetchBtcPrice();
   setInterval(fetchBtcPrice, 15000);
 
   const isPreRendered = document.getElementById('article-container')
     && document.getElementById('article-container').children.length > 0
-    && window.location.pathname.startsWith('/news/');
+    && window.location.pathname.includes('/news/');
 
   if (!isPreRendered) {
     showSkeletons();
@@ -996,7 +1014,7 @@ async function init() {
       showError(new Error('No articles available'));
     }
 
-    if (!isPreRendered || !window.location.pathname.startsWith('/news/')) {
+    if (!isPreRendered || !window.location.pathname.includes('/news/')) {
       routeFromURL();
     } else {
       showPage('page-article');

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{HTML_LANG}}">
 
 <head>
   <meta charset="UTF-8">
@@ -9,7 +9,7 @@
   <meta property="og:title" content="{{OG_TITLE}}">
   <meta property="og:description" content="{{OG_DESCRIPTION}}">
   <meta property="og:type" content="article">
-  <meta property="og:url" content="{{OG_URL}}">
+  <meta property="og:url" content="{{CANONICAL_URL}}">
   <meta property="og:image" content="{{OG_IMAGE}}">
   <meta property="og:site_name" content="BBN – Bitcoin Brasil News">
   <meta name="twitter:card" content="summary_large_image">
@@ -21,7 +21,8 @@
   <meta name="article:published_time" content="{{PUBLISHED_TIME}}">
   <meta name="article:section" content="{{ARTICLE_CATEGORY}}">
   <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
-  <link rel="canonical" href="{{OG_URL}}">
+  <link rel="canonical" href="{{CANONICAL_URL}}">
+  {{HREFLANG_TAGS}}
   <!-- Preconnects -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -65,7 +66,14 @@
       <div class="logo-eyebrow">Bitcoin Brasil News</div>
     </div>
     <div class="header-meta">
-      <div class="live-badge"><span class="live-dot"></span>Live</div>
+      <div class="header-tools" style="display:flex;align-items:center;gap:8px;">
+        <div class="lang-switcher">
+          <a href="{{LANG_EN_URL}}" class="lang-link{{LANG_EN_ACTIVE}}" title="English">EN</a>
+          <span class="lang-sep">|</span>
+          <a href="{{LANG_PT_URL}}" class="lang-link{{LANG_PT_ACTIVE}}" title="Português">PT</a>
+        </div>
+        <div class="live-badge"><span class="live-dot"></span>Live</div>
+      </div>
       <a id="btc-blofin-widget" class="btc-widget" href="https://blofin.com/register?referral_code=LEOAci"
         target="_blank" rel="noopener noreferrer" title="Open an account on BloFin">
         <span class="btc-label">BTC/USDT</span>
@@ -76,13 +84,13 @@
     </div>
   </header>
   <nav class="nav-bar">
-    <a href="/" onclick="event.preventDefault(); goHome()" class="nav-link">Home</a>
-    <a href="/archive" onclick="event.preventDefault(); goArchive()" class="nav-link">Archive</a>
+    <a href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()" class="nav-link">{{NAV_HOME_TEXT}}</a>
+    <a href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()" class="nav-link">{{NAV_ARCHIVE_TEXT}}</a>
   </nav>
 
   <main id="main-content">
   <div id="page-home">
-    <div class="section-label">── Latest news</div>
+    <div class="section-label">── {{SECTION_LATEST_NEWS}}</div>
     <div class="scroll-row" id="row-0">
       <div class="scroll-track rev" id="tr0"></div>
     </div>
@@ -96,14 +104,14 @@
     </div>
     <div class="expanded-panel" id="panel-2"></div>
     <div class="mais-noticias-container">
-      <a href="/archive" onclick="event.preventDefault(); goArchive()" class="panel-btn btn-primary">More news</a>
+      <a href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()" class="panel-btn btn-primary">{{MORE_NEWS_TEXT}}</a>
     </div>
   </div>
 
   <div id="page-article" class="active">
     <div class="article-wrap" id="article-container">
       <div class="article-breadcrumb">
-        <a class="breadcrumb-home" href="/" onclick="event.preventDefault(); goHome()">BBN</a>
+        <a class="breadcrumb-home" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">BBN</a>
         <span>›</span>
         <span>{{BREADCRUMB}}</span>
       </div>
@@ -112,7 +120,7 @@
       <div class="article-body">{{ARTICLE_BODY}}</div>
       <div style="margin-top:2.5rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
         {{SOURCE_BUTTON}}
-        <a class="article-back-btn" href="/" onclick="event.preventDefault(); goHome()">← Back to news</a>
+        <a class="article-back-btn" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">← {{BACK_TO_NEWS_TEXT}}</a>
       </div>
     </div>
   </div>
@@ -120,7 +128,7 @@
 
   <footer>
     <div class="footer-logo">BBN</div>
-    <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; Updated daily &nbsp;·&nbsp; © 2025 &nbsp;·&nbsp; <a href="/privacy" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">Privacy Policy</a></div>
+    <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; {{FOOTER_UPDATED}} &nbsp;·&nbsp; © 2025–2026 &nbsp;·&nbsp; <a href="{{FOOTER_PRIVACY_URL}}" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">{{FOOTER_PRIVACY_TEXT}}</a></div>
   </footer>
   <script>window.__BBN_CONFIG__ = {{BBN_CONFIG}};</script>
   <script src="/app.js?v=1.19" defer></script>
