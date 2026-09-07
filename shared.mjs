@@ -120,3 +120,160 @@ export function contentToHTML(text) {
   closePara(); closeList();
   return html;
 }
+
+/**
+ * Validates if a structured article section should be rendered.
+ * Excludes empty strings and explicit "Not applicable." / "N/A" values.
+ */
+export function isValidSection(val) {
+  if (val === null || val === undefined) return false;
+  if (typeof val !== 'string') return Boolean(val);
+  const trimmed = val.trim();
+  if (trimmed === '') return false;
+
+  const normalized = trimmed.toLowerCase();
+  const exclusions = [
+    'not applicable.',
+    'not applicable',
+    'não se aplica.',
+    'não se aplica',
+    'nao se aplica.',
+    'nao se aplica',
+    'n/a',
+    'n/a.',
+    'none',
+    'none.'
+  ];
+  return !exclusions.includes(normalized);
+}
+
+/**
+ * Format section text into semantic paragraphs with markdown bolding (**text** -> <strong>).
+ */
+export function formatSectionText(text) {
+  if (!text) return '';
+  return text
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => `<p class="wire-paragraph">${inlineFormat(p).replace(/\n/g, '<br>')}</p>`)
+    .join('\n');
+}
+
+/**
+ * Validates and sanitizes external URLs.
+ */
+export function sanitizeUrl(url) {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (/^https?:\/\//i.test(trimmed)) return trimmed;
+  return '';
+}
+
+/**
+ * Renders a flat single-language article row into semantic financial wire HTML.
+ * @param {Object} row - Flat row from either `articles` or `artigos`
+ * @param {'en' | 'pt'} [lang='en'] - Target locale
+ * @returns {string} Structured HTML string
+ */
+export function renderArticleContent(row, lang = 'en') {
+  if (!row) return '';
+
+  const isPt = String(lang).toLowerCase().startsWith('pt');
+
+  const HEADINGS = {
+    dataFigures: isPt ? 'DADOS & NÚMEROS' : 'DATA & FIGURES',
+    scenario: isPt ? 'O CENÁRIO' : 'THE SCENARIO',
+    quote: isPt ? 'CITAÇÃO DIRETA' : 'DIRECT QUOTE',
+    insight: isPt ? 'ANÁLISE BBN' : 'BBN INSIGHT',
+    marketReaction: isPt ? 'REAÇÃO DO MERCADO' : 'MARKET REACTION',
+    source: isPt ? 'Fonte' : 'Source'
+  };
+
+  const sections = [];
+
+  // 1. Article Lead (No section header needed)
+  if (isValidSection(row.article_lead)) {
+    sections.push(`
+      <div class="wire-section wire-lead">
+        ${formatSectionText(row.article_lead)}
+      </div>
+    `);
+  }
+
+  // 2. Data & Figures
+  if (isValidSection(row.data_figures)) {
+    sections.push(`
+      <section class="wire-section wire-data-figures">
+        <h3 class="wire-heading">${HEADINGS.dataFigures}</h3>
+        <div class="wire-figures-content">
+          ${formatSectionText(row.data_figures)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 3. The Scenario
+  if (isValidSection(row.scenario)) {
+    sections.push(`
+      <section class="wire-section wire-scenario">
+        <h3 class="wire-heading">${HEADINGS.scenario}</h3>
+        <div class="wire-scenario-content">
+          ${formatSectionText(row.scenario)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 4. Direct Quote (Semantic <blockquote>)
+  if (isValidSection(row.quote_text)) {
+    sections.push(`
+      <section class="wire-section wire-quote">
+        <h3 class="wire-heading">${HEADINGS.quote}</h3>
+        <blockquote class="wire-blockquote">
+          ${formatSectionText(row.quote_text)}
+        </blockquote>
+      </section>
+    `);
+  }
+
+  // 5. BBN Insight
+  if (isValidSection(row.insight)) {
+    sections.push(`
+      <section class="wire-section wire-insight">
+        <h3 class="wire-heading">${HEADINGS.insight}</h3>
+        <div class="wire-insight-card">
+          ${formatSectionText(row.insight)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 6. Market Reaction
+  if (isValidSection(row.market_reaction)) {
+    sections.push(`
+      <section class="wire-section wire-market-reaction">
+        <h3 class="wire-heading">${HEADINGS.marketReaction}</h3>
+        <div class="wire-reaction-content">
+          ${formatSectionText(row.market_reaction)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 7. Source Attribution
+  const safeSourceUrl = sanitizeUrl(row.source_url || row.link);
+  if (safeSourceUrl) {
+    const displayName = (row.source_name || safeSourceUrl).trim();
+    sections.push(`
+      <footer class="wire-source-attribution">
+        <a href="${esc(safeSourceUrl)}" target="_blank" rel="noopener noreferrer" class="wire-source-link">
+          ${HEADINGS.source}: ${esc(displayName)}
+        </a>
+      </footer>
+    `);
+  }
+
+  return sections.join('\n');
+}
+

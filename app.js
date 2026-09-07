@@ -105,12 +105,147 @@ function sanitizeUrl(url) {
   return url.trim();
 }
 
+function isValidSection(val) {
+  if (val === null || val === undefined) return false;
+  if (typeof val !== 'string') return Boolean(val);
+  const trimmed = val.trim();
+  if (trimmed === '') return false;
+
+  const normalized = trimmed.toLowerCase();
+  const exclusions = [
+    'not applicable.', 'not applicable',
+    'não se aplica.', 'não se aplica',
+    'nao se aplica.', 'nao se aplica',
+    'n/a', 'n/a.', 'none', 'none.'
+  ];
+  return !exclusions.includes(normalized);
+}
+
+function formatSectionText(text) {
+  if (!text) return '';
+  return text
+    .split(/\n\s*\n/)
+    .map(p => p.trim())
+    .filter(Boolean)
+    .map(p => `<p class="wire-paragraph">${inlineFormat(p).replace(/\n/g, '<br>')}</p>`)
+    .join('\n');
+}
+
+function renderArticleContent(row, lang) {
+  if (!row) return '';
+  const isPt = String(lang).toLowerCase().startsWith('pt');
+
+  const HEADINGS = {
+    dataFigures: isPt ? 'DADOS & NÚMEROS' : 'DATA & FIGURES',
+    scenario: isPt ? 'O CENÁRIO' : 'THE SCENARIO',
+    quote: isPt ? 'CITAÇÃO DIRETA' : 'DIRECT QUOTE',
+    insight: isPt ? 'ANÁLISE BBN' : 'BBN INSIGHT',
+    marketReaction: isPt ? 'REAÇÃO DO MERCADO' : 'MARKET REACTION',
+    source: isPt ? 'Fonte' : 'Source'
+  };
+
+  const sections = [];
+
+  // 1. Article Lead
+  if (isValidSection(row.article_lead)) {
+    sections.push(`
+      <div class="wire-section wire-lead">
+        ${formatSectionText(row.article_lead)}
+      </div>
+    `);
+  }
+
+  // 2. Data & Figures
+  if (isValidSection(row.data_figures)) {
+    sections.push(`
+      <section class="wire-section wire-data-figures">
+        <h3 class="wire-heading">${HEADINGS.dataFigures}</h3>
+        <div class="wire-figures-content">
+          ${formatSectionText(row.data_figures)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 3. The Scenario
+  if (isValidSection(row.scenario)) {
+    sections.push(`
+      <section class="wire-section wire-scenario">
+        <h3 class="wire-heading">${HEADINGS.scenario}</h3>
+        <div class="wire-scenario-content">
+          ${formatSectionText(row.scenario)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 4. Direct Quote (Semantic <blockquote>)
+  if (isValidSection(row.quote_text)) {
+    sections.push(`
+      <section class="wire-section wire-quote">
+        <h3 class="wire-heading">${HEADINGS.quote}</h3>
+        <blockquote class="wire-blockquote">
+          ${formatSectionText(row.quote_text)}
+        </blockquote>
+      </section>
+    `);
+  }
+
+  // 5. BBN Insight
+  if (isValidSection(row.insight)) {
+    sections.push(`
+      <section class="wire-section wire-insight">
+        <h3 class="wire-heading">${HEADINGS.insight}</h3>
+        <div class="wire-insight-card">
+          ${formatSectionText(row.insight)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 6. Market Reaction
+  if (isValidSection(row.market_reaction)) {
+    sections.push(`
+      <section class="wire-section wire-market-reaction">
+        <h3 class="wire-heading">${HEADINGS.marketReaction}</h3>
+        <div class="wire-reaction-content">
+          ${formatSectionText(row.market_reaction)}
+        </div>
+      </section>
+    `);
+  }
+
+  // 7. Source Attribution
+  const safeSourceUrl = sanitizeUrl(row.source_url || row.link);
+  if (safeSourceUrl) {
+    const displayName = (row.source_name || safeSourceUrl).trim();
+    sections.push(`
+      <footer class="wire-source-attribution">
+        <a href="${esc(safeSourceUrl)}" target="_blank" rel="noopener noreferrer" class="wire-source-link">
+          ${HEADINGS.source}: ${esc(displayName)}
+        </a>
+      </footer>
+    `);
+  }
+
+  return sections.join('\n');
+}
+
 function renderArticle(post) {
   const container = document.getElementById('article-container');
-  const safeLink = sanitizeUrl(post.link);
+  const safeLink = sanitizeUrl(post.source_url || post.link);
+  const locale = getCurrentLocale();
   const sourceBtn = safeLink
-    ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">→ View original source</a>`
+    ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">${locale === 'pt' ? '→ Ver fonte original' : '→ View original source'}</a>`
     : '';
+
+  const hasStructured = Boolean(
+    post.article_lead || post.data_figures || post.scenario ||
+    post.quote_text || post.insight || post.market_reaction
+  );
+  const bodyHtml = hasStructured
+    ? renderArticleContent(post, locale)
+    : contentToHTML(post.body || post.conteudo_blog || '');
 
   container.innerHTML = `
     <div class="article-breadcrumb">
@@ -120,10 +255,10 @@ function renderArticle(post) {
     </div>
     <h1 class="article-title">${esc(post.title)}</h1>
     <hr class="article-divider">
-    <div class="article-body">${contentToHTML(post.body)}</div>
+    <div class="article-body">${bodyHtml}</div>
     <div style="margin-top:2.5rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
       ${sourceBtn}
-      <button class="article-back-btn" onclick="goHome()">← Back to news</button>
+      <button class="article-back-btn" onclick="goHome()">${locale === 'pt' ? '← Voltar às notícias' : '← Back to news'}</button>
     </div>
   `;
 }
@@ -304,33 +439,52 @@ function processArticleRows(rows) {
 }
 
 async function fetchFromSupabase() {
-  // [M-04] select=* substituído por colunas explícitas para evitar exposição de campos internos futuros
-  const cols = 'id,headline,content,article_lead,summary,hook,created_at,link';
-  const url = `${SUPABASE_URL}/rest/v1/articles?order=created_at.desc&limit=500&select=${cols}`;
-  const res = await fetch(url, {
-    headers: {
-      'apikey': SUPABASE_ANON_KEY,
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-    }
-  });
-  if (!res.ok) throw new Error(`Supabase error: ${res.status}`);
-  const rows = await res.json();
-  if (!Array.isArray(rows) || rows.length === 0) throw new Error('No articles in Supabase');
+  const locale = getCurrentLocale();
+  const primaryTable = locale === 'pt' ? 'artigos' : 'articles';
+  
+  async function fetchTable(table) {
+    const url = `${SUPABASE_URL}/rest/v1/${table}?order=created_at.desc&limit=500&select=*`;
+    const res = await fetch(url, {
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+      }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return Array.isArray(data) && data.length > 0 ? data : null;
+  }
+
+  let rows = await fetchTable(primaryTable);
+  if (!rows && primaryTable === 'artigos') {
+    // Graceful fallback to English articles if Portuguese table is still populating
+    rows = await fetchTable('articles');
+  }
+  if (!rows || rows.length === 0) throw new Error('No articles in Supabase');
 
   // Map Supabase columns to BBN article format
   return rows.map(row => {
-    const headlineClean = (row.headline || 'Untitled').replace(/\*\*/g, '').trim();
+    const headlineClean = (row.headline || (locale === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
+    const content = row.content || row.article_lead || '';
     return {
       id: String(row.id),
       headline: headlineClean,
       title: headlineClean,
-      conteudo_blog: row.content || row.article_lead || '',
+      conteudo_blog: content,
       summary: row.summary || '',
       hook: row.hook || '',
-      score: 7, // column removed from Supabase; defaulting to 7
+      score: 7,
       time: row.created_at || new Date().toISOString(),
-      link: '',
-      tags: clientExtractTags(row.headline || '', row.content || '')
+      link: row.source_url || row.link || '',
+      source_name: row.source_name || '',
+      source_url: row.source_url || row.link || '',
+      article_lead: row.article_lead || '',
+      data_figures: row.data_figures || '',
+      scenario: row.scenario || '',
+      quote_text: row.quote_text || '',
+      insight: row.insight || '',
+      market_reaction: row.market_reaction || '',
+      tags: row.tag ? (Array.isArray(row.tag) ? row.tag : String(row.tag).split(/[,\s#]+/).filter(Boolean)) : clientExtractTags(row.headline || '', content)
     };
   });
 }

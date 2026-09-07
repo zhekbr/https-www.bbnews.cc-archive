@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } fr
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { toSlug, extractTitle, extractBody, contentToHTML, esc } from './shared.mjs';
+import { toSlug, extractTitle, extractBody, contentToHTML, esc, renderArticleContent } from './shared.mjs';
 
 // ── Configuration ──────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -233,9 +233,9 @@ const PRIVACY_BODY_EN = `
           </section>
 `;
 
-// ── Fetch articles from Supabase ──────────────────────────
-async function fetchFromSupabase() {
-  const { supabaseUrl, supabaseKey, supabaseTable, supabaseLimit } = CONFIG;
+// ── Fetch articles from Supabase (articles or artigos) ────────
+async function fetchSupabaseTable(tableName) {
+  const { supabaseUrl, supabaseKey, supabaseLimit } = CONFIG;
 
   if (!supabaseKey) {
     throw new Error('SUPABASE_ANON_KEY not set in environment variables.');
@@ -244,10 +244,9 @@ async function fetchFromSupabase() {
   let allRows = [];
   let from = 0;
   const pageSize = 1000;
-  const cols = 'id,headline,content,article_lead,summary,hook,created_at,link';
 
   while (true) {
-    const url = `${supabaseUrl}/rest/v1/${supabaseTable}?order=created_at.desc&limit=${pageSize}&offset=${from}&select=${cols}`;
+    const url = `${supabaseUrl}/rest/v1/${tableName}?order=created_at.desc&limit=${pageSize}&offset=${from}&select=*`;
     const res = await fetch(url, {
       headers: {
         'apikey': supabaseKey,
@@ -258,47 +257,63 @@ async function fetchFromSupabase() {
 
     if (!res.ok) {
       const errText = await res.text();
-      throw new Error(`Supabase fetch failed (${res.status}): ${errText}`);
+      if (res.status === 404 || res.status === 400) {
+        console.warn(`⚠️ Warning: Supabase table '${tableName}' (${res.status}): ${errText}`);
+        return [];
+      }
+      throw new Error(`Supabase fetch failed for '${tableName}' (${res.status}): ${errText}`);
     }
 
     const rows = await res.json();
     if (!Array.isArray(rows) || rows.length === 0) break;
 
     allRows = allRows.concat(rows);
-    if (rows.length < pageSize || allRows.length >= supabaseLimit) break;
+    if (rows.length < pageSize || allRows.length >= (supabaseLimit || 5000)) break;
     from += pageSize;
   }
 
-  if (allRows.length === 0) {
-    throw new Error('No articles found in Supabase.');
-  }
+  return allRows;
+}
 
-  // Map Supabase columns to BBN article format
-  return allRows.map(row => {
-    const title = (row.headline || 'Untitled').replace(/\*\*/g, '').trim();
-    const content = row.content || row.article_lead || '';
-    const summary = row.summary || (content ? content.substring(0, 160).replace(/\n/g, ' ').trim() : '');
-    const hook = row.hook || '';
-    const score = 7;
-    const time = row.created_at
-      ? new Date(row.created_at).toISOString()
-      : new Date().toISOString();
+// ── Map Supabase Row to Internal BBN Article Model ──────────
+function mapSupabaseRow(row, lang = 'en') {
+  const title = (row.headline || (lang === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
+  const content = row.content || row.conteudo_blog || row.article_lead || '';
+  const body = extractBody(content, title) || content;
+  const summary = row.summary || (row.article_lead ? row.article_lead.slice(0, 160).replace(/\n/g, ' ').trim() : (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : ''));
+  const hook = row.hook || '';
+  const score = 7;
+  const time = row.created_at
+    ? new Date(row.created_at).toISOString()
+    : (row.time ? new Date(row.time).toISOString() : new Date().toISOString());
 
-    const tags = extractTagsFromContent(title, content);
+  const tags = row.tag
+    ? (Array.isArray(row.tag) ? row.tag : String(row.tag).split(/[,\s#]+/).filter(Boolean))
+    : extractTagsFromContent(title, content);
 
-    return {
-      id: String(row.id),
-      link: row.link || '',
-      time,
-      score: isNaN(score) ? 7 : score,
-      headline: title,
-      title: title,
-      hook: hook,
-      summary: summary,
-      tags: tags,
-      conteudo_blog: content
-    };
-  });
+  return {
+    id: String(row.id),
+    lang,
+    title,
+    headline: title,
+    slug: toSlug(title),
+    body,
+    conteudo_blog: content,
+    summary,
+    hook,
+    score,
+    time,
+    tags,
+    link: row.source_url || row.link || '',
+    source_name: row.source_name || '',
+    source_url: row.source_url || row.link || '',
+    article_lead: row.article_lead || '',
+    data_figures: row.data_figures || '',
+    scenario: row.scenario || '',
+    quote_text: row.quote_text || '',
+    insight: row.insight || '',
+    market_reaction: row.market_reaction || ''
+  };
 }
 
 // ── Auto-tag articles based on keywords ──────────────────────
@@ -474,8 +489,16 @@ function parseLocalizedArticles(rawArticles) {
         title,
         body,
         slug,
-        link: row.link ?? '',
-        summary: row.summary || (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : ''),
+        link: row.source_url || row.link || '',
+        source_name: row.source_name || '',
+        source_url: row.source_url || row.link || '',
+        article_lead: row.article_lead || '',
+        data_figures: row.data_figures || '',
+        scenario: row.scenario || '',
+        quote_text: row.quote_text || '',
+        insight: row.insight || '',
+        market_reaction: row.market_reaction || '',
+        summary: row.summary || (row.article_lead ? row.article_lead.slice(0, 160).replace(/\n/g, ' ').trim() : (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : '')),
         hook: row.hook || '',
         time: row.time || new Date().toISOString(),
         score: row.score || 7,
@@ -495,8 +518,16 @@ function parseLocalizedArticles(rawArticles) {
         title,
         body,
         slug,
-        link: row.link ?? '',
-        summary: row.summary || (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : ''),
+        link: row.source_url || row.link || '',
+        source_name: row.source_name || '',
+        source_url: row.source_url || row.link || '',
+        article_lead: row.article_lead || '',
+        data_figures: row.data_figures || '',
+        scenario: row.scenario || '',
+        quote_text: row.quote_text || '',
+        insight: row.insight || '',
+        market_reaction: row.market_reaction || '',
+        summary: row.summary || (row.article_lead ? row.article_lead.slice(0, 160).replace(/\n/g, ' ').trim() : (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : '')),
         hook: row.hook || '',
         time: row.time || new Date().toISOString(),
         score: row.score || 7,
@@ -510,10 +541,12 @@ function parseLocalizedArticles(rawArticles) {
     }
   });
 
-  // Second pass: link unilateral posts if translation_of / pair_id matches
+  // Second pass: link posts if translation_of / pair_id matches or same ID exists
   enPosts.forEach(post => {
-    if (!post.translation && post.pairId) {
-      const counterpart = ptById.get(String(post.pairId));
+    if (!post.translation) {
+      const byPair = post.pairId ? ptById.get(String(post.pairId)) : null;
+      const byId = ptById.get(String(post.id));
+      const counterpart = byPair || byId;
       if (counterpart) {
         post.translation = counterpart;
         counterpart.translation = post;
@@ -521,8 +554,10 @@ function parseLocalizedArticles(rawArticles) {
     }
   });
   ptPosts.forEach(post => {
-    if (!post.translation && post.pairId) {
-      const counterpart = enById.get(String(post.pairId));
+    if (!post.translation) {
+      const byPair = post.pairId ? enById.get(String(post.pairId)) : null;
+      const byId = enById.get(String(post.id));
+      const counterpart = byPair || byId;
       if (counterpart) {
         post.translation = counterpart;
         counterpart.translation = post;
@@ -565,7 +600,13 @@ function generateArticlePage(post, template, lang) {
   const canonicalUrl = `${CONFIG.baseUrl}/${lang}/news/${post.slug}`;
   const ogImage = CONFIG.baseUrl + CONFIG.defaultOgImage;
   const breadcrumb = esc(post.title.slice(0, 45)) + (post.title.length > 45 ? '…' : '');
-  const articleBodyHtml = contentToHTML(post.body);
+  const hasStructuredSections = Boolean(
+    post.article_lead || post.data_figures || post.scenario ||
+    post.quote_text || post.insight || post.market_reaction
+  );
+  const articleBodyHtml = hasStructuredSections
+    ? renderArticleContent(post, lang)
+    : contentToHTML(post.body || post.conteudo_blog || '');
   const safeLink = sanitizeUrl(post.link);
   const sourceBtn = safeLink
     ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">${dict.viewOriginalSource}</a>`
@@ -1161,24 +1202,44 @@ async function build() {
     }
   }
 
-  // 2. Fetch fresh articles from Supabase
-  console.log('⏳ Connecting to Supabase...');
-  let fetchedArticles = [];
+  // 2. Fetch fresh articles from Supabase (Two distinct pipelines: articles and artigos)
+  console.log('⏳ Connecting to Supabase (English: "articles", Portuguese: "artigos")...');
+  let enFetched = [];
+  let ptFetched = [];
   try {
-    fetchedArticles = await fetchFromSupabase();
-    console.log(`✅ Fetched ${fetchedArticles.length} articles from Supabase`);
+    const results = await Promise.allSettled([
+      fetchSupabaseTable('articles'),
+      fetchSupabaseTable('artigos')
+    ]);
+
+    if (results[0].status === 'fulfilled') {
+      enFetched = results[0].value.map(row => mapSupabaseRow(row, 'en'));
+      console.log(`✅ [English Pipeline] Fetched ${enFetched.length} articles from "articles"`);
+    } else {
+      console.warn(`⚠️ [English Pipeline] Warning: ${results[0].reason?.message}`);
+    }
+
+    if (results[1].status === 'fulfilled') {
+      ptFetched = results[1].value.map(row => mapSupabaseRow(row, 'pt'));
+      console.log(`✅ [Portuguese Pipeline] Fetched ${ptFetched.length} articles from "artigos"`);
+    } else {
+      console.warn(`⚠️ [Portuguese Pipeline] Warning: ${results[1].reason?.message}`);
+    }
   } catch (err) {
     console.error(`❌ Failed to fetch articles from Supabase: ${err.message}`);
     process.exit(1);
   }
 
-  // Merge articles: prioritize fetchedArticles but preserve historical database
+  // Merge articles: prioritize fresh fetches but preserve local database records
   const articleMap = new Map();
   dbArticles.forEach(item => {
-    if (item && item.id) articleMap.set(String(item.id), item);
+    if (item && item.id) articleMap.set(`${item.lang || 'en'}-${item.id}`, item);
   });
-  fetchedArticles.forEach(item => {
-    if (item && item.id) articleMap.set(String(item.id), item);
+  enFetched.forEach(item => {
+    if (item && item.id) articleMap.set(`en-${item.id}`, item);
+  });
+  ptFetched.forEach(item => {
+    if (item && item.id) articleMap.set(`pt-${item.id}`, item);
   });
 
   const mergedArticles = Array.from(articleMap.values());
