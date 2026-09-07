@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } fr
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { toSlug, extractTitle, extractBody, contentToHTML, esc, renderArticleContent } from './shared.mjs';
+import { toSlug, extractTitle, extractBody, contentToHTML, esc, renderArticleContent, assembleFullArticleMarkdown } from './shared.mjs';
 
 // ── Configuration ──────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -278,8 +278,9 @@ async function fetchSupabaseTable(tableName) {
 // ── Map Supabase Row to Internal BBN Article Model ──────────
 function mapSupabaseRow(row, lang = 'en') {
   const title = (row.headline || (lang === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
-  const content = row.content || row.conteudo_blog || row.article_lead || '';
-  const body = extractBody(content, title) || content;
+  const assembledMarkdown = assembleFullArticleMarkdown(row, lang);
+  const content = row.content || row.conteudo_blog || assembledMarkdown;
+  const body = assembledMarkdown || extractBody(content, title) || content;
   const summary = row.summary || (row.article_lead ? row.article_lead.slice(0, 160).replace(/\n/g, ' ').trim() : (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : ''));
   const hook = row.hook || '';
   const score = 7;

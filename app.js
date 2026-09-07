@@ -424,14 +424,66 @@ function clientExtractTags(title, content) {
   return matched.length > 0 ? matched : ['news'];
 }
 
+function assembleFullArticleMarkdown(row, lang) {
+  if (!row) return '';
+  const isPt = String(lang || getCurrentLocale()).toLowerCase().startsWith('pt');
+  const sections = [];
+
+  if (isValidSection(row.article_lead)) {
+    sections.push(row.article_lead.trim());
+  }
+  if (isValidSection(row.data_figures)) {
+    sections.push(`### ${isPt ? 'DADOS & NÚMEROS' : 'DATA & FIGURES'}\n\n${row.data_figures.trim()}`);
+  }
+  if (isValidSection(row.scenario)) {
+    sections.push(`### ${isPt ? 'O CENÁRIO' : 'THE SCENARIO'}\n\n${row.scenario.trim()}`);
+  }
+  if (isValidSection(row.quote_text)) {
+    sections.push(`### ${isPt ? 'CITAÇÃO DIRETA' : 'DIRECT QUOTE'}\n\n> ${row.quote_text.trim()}`);
+  }
+  if (isValidSection(row.insight)) {
+    sections.push(`### ${isPt ? 'ANÁLISE BBN' : 'BBN INSIGHT'}\n\n${row.insight.trim()}`);
+  }
+  if (isValidSection(row.market_reaction)) {
+    sections.push(`### ${isPt ? 'REAÇÃO DO MERCADO' : 'MARKET REACTION'}\n\n${row.market_reaction.trim()}`);
+  }
+  const sourceUrl = (row.source_url || row.link || '').trim();
+  const sourceName = (row.source_name || sourceUrl).trim();
+  if (sourceUrl) {
+    sections.push(`**${isPt ? 'Fonte' : 'Source'}:** [${sourceName}](${sourceUrl})`);
+  }
+
+  return sections.join('\n\n');
+}
+
 function processArticleRows(rows) {
   rows.forEach((row) => {
-    const content = row.conteudo_blog || row.headline;
-    const title = row.headline && row.headline !== 'Untitled' ? row.headline : extractTitle(content);
-    const body = extractBody(content, title);
+    const locale = getCurrentLocale();
+    const title = row.headline && row.headline !== 'Untitled' ? row.headline : (row.title || 'Untitled');
     let slug = toSlug(title);
     if (slugMap[slug]) slug = `${slug}-${row.id}`;
-    const post = { id: row.id, title, body, slug, link: row.link ?? '' };
+    
+    const assembledBody = assembleFullArticleMarkdown(row, locale);
+    const body = assembledBody || row.conteudo_blog || row.content || '';
+
+    const post = {
+      ...row,
+      id: String(row.id),
+      title,
+      headline: title,
+      body,
+      conteudo_blog: body,
+      slug,
+      link: row.source_url || row.link || '',
+      source_name: row.source_name || '',
+      source_url: row.source_url || row.link || '',
+      article_lead: row.article_lead || '',
+      data_figures: row.data_figures || '',
+      scenario: row.scenario || '',
+      quote_text: row.quote_text || '',
+      insight: row.insight || '',
+      market_reaction: row.market_reaction || ''
+    };
     slugMap[slug] = post;
     row._slug = slug;
     row.title = title;

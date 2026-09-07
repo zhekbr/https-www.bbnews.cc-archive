@@ -277,3 +277,40 @@ export function renderArticleContent(row, lang = 'en') {
   return sections.join('\n');
 }
 
+/**
+ * Assembles the full article text in markdown from discrete sections
+ * when the database doesn't supply a pre-compiled 'content' field.
+ */
+export function assembleFullArticleMarkdown(row, lang = 'en') {
+  if (!row) return '';
+  const isPt = String(lang).toLowerCase().startsWith('pt');
+  const sections = [];
+
+  if (isValidSection(row.article_lead)) {
+    sections.push(row.article_lead.trim());
+  }
+  if (isValidSection(row.data_figures)) {
+    sections.push(`### ${isPt ? 'DADOS & NÚMEROS' : 'DATA & FIGURES'}\n\n${row.data_figures.trim()}`);
+  }
+  if (isValidSection(row.scenario)) {
+    sections.push(`### ${isPt ? 'O CENÁRIO' : 'THE SCENARIO'}\n\n${row.scenario.trim()}`);
+  }
+  if (isValidSection(row.quote_text)) {
+    sections.push(`### ${isPt ? 'CITAÇÃO DIRETA' : 'DIRECT QUOTE'}\n\n> ${row.quote_text.trim()}`);
+  }
+  if (isValidSection(row.insight)) {
+    sections.push(`### ${isPt ? 'ANÁLISE BBN' : 'BBN INSIGHT'}\n\n${row.insight.trim()}`);
+  }
+  if (isValidSection(row.market_reaction)) {
+    sections.push(`### ${isPt ? 'REAÇÃO DO MERCADO' : 'MARKET REACTION'}\n\n${row.market_reaction.trim()}`);
+  }
+  const sourceUrl = (row.source_url || row.link || '').trim();
+  const sourceName = (row.source_name || sourceUrl).trim();
+  if (sourceUrl) {
+    sections.push(`**${isPt ? 'Fonte' : 'Source'}:** [${sourceName}](${sourceUrl})`);
+  }
+
+  return sections.join('\n\n');
+}
+
+
