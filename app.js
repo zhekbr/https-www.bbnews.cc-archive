@@ -1,6 +1,6 @@
 // --- BBN Configuration (injetada pelo build SSG via window.__BBN_CONFIG__) ---
-const SUPABASE_URL = window.__BBN_CONFIG__?.url || '';
-const SUPABASE_ANON_KEY = window.__BBN_CONFIG__?.key || '';
+const SUPABASE_URL = window.__BBN_CONFIG__?.url || 'https://thyibhsuhpxqexjvprct.supabase.co';
+const SUPABASE_ANON_KEY = window.__BBN_CONFIG__?.key || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRoeWliaHN1aHB4cWV4anZwcmN0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA1OTQ5MjAsImV4cCI6MjA5NjE3MDkyMH0._KQeNO86_wm4yzXEf_2T6GVNFazWdWl0n25Oq1jZtOI';
 
 const ROWS_COUNT = 3;
 let activeCard = null;
@@ -767,7 +767,8 @@ async function fetchFromSupabase() {
 
   // Map Supabase columns to BBN article format and filter out empty/untitled ones
   return rows.map(row => {
-    const headlineClean = (row.headline || (locale === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
+    const rawTitle = (row.headline || row.title || '').trim() || ((row.hook || row.summary || '').split(/[.!?]/)[0].trim().slice(0, 110));
+    const headlineClean = (rawTitle || (locale === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
     const content = row.content || row.article_lead || '';
     return {
       id: String(row.id),

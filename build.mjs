@@ -291,7 +291,8 @@ async function fetchSupabaseTable(tableName) {
 
 // ── Map Supabase Row to Internal BBN Article Model ──────────
 function mapSupabaseRow(row, lang = 'en') {
-  const title = (row.headline || (lang === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
+  const rawTitle = (row.headline || row.title || '').trim() || ((row.hook || row.summary || '').split(/[.!?]/)[0].trim().slice(0, 110));
+  const title = (rawTitle || (lang === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
   const assembledMarkdown = assembleFullArticleMarkdown(row, lang);
   const content = row.content || row.conteudo_blog || assembledMarkdown;
   const body = assembledMarkdown || extractBody(content, title) || content;
@@ -1039,6 +1040,7 @@ function generateHomePage(articles, template, lang = 'en', tagCloudHtml = '') {
   html = html.replace(/\{\{ARTICLE_INDEX\}\}/g, () => articleIndex);
   html = html.replace(/\{\{TAG_CLOUD\}\}/g, () => '');
   html = html.replace(/\{\{FILTERS\}\}/g, () => '');
+  html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfig);
 
   // Switcher & Navigation
   html = html.replace(/\{\{LANG_EN_URL\}\}/g, () => '/en/');
