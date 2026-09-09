@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="{{HTML_LANG}}">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{PAGE_TITLE}}</title>
+  <meta name="description" content="{{PAGE_DESCRIPTION}}">
+  <meta property="og:title" content="{{PAGE_TITLE}}">
+  <meta property="og:description" content="{{PAGE_DESCRIPTION}}">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="{{CANONICAL_URL}}">
+  <meta property="og:image" content="{{BASE_URL}}/assets/og-default.png">
+  <meta property="og:site_name" content="BBN – Bitcoin Brasil News">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{PAGE_TITLE}}">
+  <meta name="twitter:description" content="{{PAGE_DESCRIPTION}}">
+  <meta name="twitter:image" content="{{BASE_URL}}/assets/og-default.png">
+  <!-- Authorship & Robots -->
+  <meta name="author" content="BBN – Bitcoin Brasil News">
+  <meta name="publisher" content="BBN – Bitcoin Brasil News">
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <link rel="canonical" href="{{CANONICAL_URL}}">
+  {{HREFLANG_TAGS}}
+  <!-- Preconnects -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://www.google-analytics.com">
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  <link rel="dns-prefetch" href="https://www.google-analytics.com">
+  <!-- Google Fonts: async non-blocking load -->
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Sora:wght@400;500;700&display=swap"></noscript>
+  <!-- Favicon & Manifest -->
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#F7931A">
+  <link rel="stylesheet" href="/style.css?v=2.1">
+  <!-- JSON-LD: CollectionPage -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "name": "{{PAGE_TITLE}}",
+    "description": "{{PAGE_DESCRIPTION}}",
+    "url": "{{CANONICAL_URL}}",
+    "publisher": {
+      "@type": "Organization",
+      "name": "BBN – Bitcoin Brasil News",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "{{BASE_URL}}/assets/logo.png"
+      }
+    }
+  }
+  </script>
+  <!-- Google Analytics 4 (deferred) -->
+  <script>
+    window.addEventListener('load', function() {
+      var s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=G-WWVSBWXE1T';
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-WWVSBWXE1T');
+    });
+  </script>
+</head>
+
+<body>
+  <header>
+    <div class="logo-lockup" onclick="goHome()" style="cursor: pointer" title="Back to Home">
+      <div class="logo">BBN</div>
+      <div class="logo-eyebrow">Bitcoin Brasil News</div>
+    </div>
+    <div class="header-meta">
+      <div class="header-tools" style="display:flex;align-items:center;gap:8px;">
+        <div class="lang-switcher">
+          <a href="{{LANG_EN_URL}}" class="lang-link{{LANG_EN_ACTIVE}}" title="English">EN</a>
+          <span class="lang-sep">|</span>
+          <a href="{{LANG_PT_URL}}" class="lang-link{{LANG_PT_ACTIVE}}" title="Português">PT</a>
+        </div>
+        <div class="live-badge"><span class="live-dot"></span>Live</div>
+      </div>
+      <a id="btc-blofin-widget" class="btc-widget" href="https://blofin.com/register?referral_code=LEOAci"
+        target="_blank" rel="noopener noreferrer" title="Open an account on BloFin">
+        <span class="btc-label">BTC/USDT</span>
+        <span class="btc-sep">|</span>
+        <span id="btc-price">Fetching...</span>
+      </a>
+      <div class="date-line" id="date-display"></div>
+    </div>
+  </header>
+  <nav class="nav-bar">
+    <a href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()" class="nav-link">{{NAV_HOME_TEXT}}</a>
+    <a href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()" class="nav-link active">{{NAV_ARCHIVE_TEXT}}</a>
+  </nav>
+  <main id="main-content">
+  <div class="ticker-wrap">
+    <div class="ticker-belt" id="ticker-belt"></div>
+  </div>
+
+  <div id="page-tag-archive" class="active">
+    <div class="archive-wrap">
+      <div class="article-breadcrumb">
+        <a class="breadcrumb-home" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">BBN</a>
+        <span>›</span>
+        <a href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()">{{NAV_ARCHIVE_TEXT}}</a>
+        <span>›</span>
+        <span>{{REGION_LABEL}}</span>
+      </div>
+
+      <div class="tag-archive-header">
+        <div class="tag-title-badge">
+          <span class="tag-title-hash" style="color:var(--orange);">◈</span>
+          <h1 class="tag-title-heading">{{REGION_LABEL}}</h1>
+        </div>
+        <div class="tag-meta-info">
+          <span class="tag-count-badge">{{REGION_ARTICLE_COUNT}} {{ARTICLES_PUBLISHED_TEXT}}</span>
+          <a href="{{NAV_ARCHIVE_URL}}" class="tag-back-archive-link">← {{ALL_ARCHIVES_TEXT}}</a>
+        </div>
+      </div>
+
+      <!-- 2-Tier Regional Navigation Bar -->
+{{REGIONAL_NAV}}
+
+      <div class="archive-controls" style="display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap;">
+        <div class="search-box-wrap" style="flex:1;min-width:250px;position:relative;">
+          <input type="text" id="archive-search" placeholder="{{SEARCH_PLACEHOLDER}}" class="archive-search-input" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;transition:border-color 0.2s;">
+        </div>
+        <div class="filter-dropdown-wrap" style="width:180px;">
+          <select id="archive-period" class="archive-select" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;cursor:pointer;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5%201.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');background-repeat:no-repeat;background-position:right%201rem%20center;background-size:0.65rem%20auto;padding-right:2.5rem;">
+            <option value="all">{{PERIOD_ALL_TIME}}</option>
+            <option value="today">{{PERIOD_TODAY}}</option>
+            <option value="week">{{PERIOD_WEEK}}</option>
+            <option value="month">{{PERIOD_MONTH}}</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="archive-container" id="archive-grid">
+{{ARCHIVE_GRID}}
+      </div>
+      <div style="margin-top:3rem;display:flex;justify-content:center;">
+        <a class="article-back-btn" href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()">← {{ALL_ARCHIVES_TEXT}}</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="page-article">
+    <div class="article-wrap" id="article-container"></div>
+  </div>
+  </main>
+
+  <footer>
+    <div class="footer-logo">BBN</div>
+    <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; {{FOOTER_UPDATED}} &nbsp;·&nbsp; © 2025–2026 &nbsp;·&nbsp; <a href="{{FOOTER_PRIVACY_URL}}" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">{{FOOTER_PRIVACY_TEXT}}</a></div>
+  </footer>
+  <script>window.__BBN_CONFIG__ = {{BBN_CONFIG}};</script>
+  <script src="/app.js?v=2.1" defer></script>
+  <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "95d43404634540c89039a8ce4c815372"}'></script><!-- End Cloudflare Web Analytics -->
+</body>
+
+</html>

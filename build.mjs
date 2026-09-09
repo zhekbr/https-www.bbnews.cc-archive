@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } fr
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { toSlug, extractTitle, extractBody, contentToHTML, esc, renderArticleContent, assembleFullArticleMarkdown } from './shared.mjs';
+import { toSlug, extractTitle, extractBody, contentToHTML, esc, renderArticleContent, assembleFullArticleMarkdown, toTagSlug, parseTags, formatTagPillsHtml, formatTagCloudHtml, REGIONAL_TAXONOMY, getRegionForTag, getRegionForArticle, groupTagsByRegion, formatRegionalNavHtml, isValidArticleRecord } from './shared.mjs';
 
 // ── Configuration ──────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -53,7 +53,14 @@ const I18N = {
     filterLabel: 'FILTER:',
     allNews: 'All News',
     viewOriginalSource: '→ View original source',
-    privacyLastUpdated: 'Last Updated: September 2026'
+    privacyLastUpdated: 'Last Updated: September 2026',
+    tagArchiveTitle: 'News Archive',
+    tagArchiveDesc: 'Articles and real-time coverage tagged with #',
+    articlesTaggedText: 'articles published',
+    allArchivesText: 'All News Archive',
+    topicsHeading: 'TOPICS',
+    regionArchiveTitle: 'News & Analysis',
+    regionArchiveDesc: 'Comprehensive news, sub-topics, and real-time coverage for '
   },
   pt: {
     htmlLang: 'pt-BR',
@@ -82,7 +89,14 @@ const I18N = {
     filterLabel: 'FILTRAR:',
     allNews: 'Todas as Notícias',
     viewOriginalSource: '→ Ver fonte original',
-    privacyLastUpdated: 'Última atualização: Setembro de 2026'
+    privacyLastUpdated: 'Última atualização: Setembro de 2026',
+    tagArchiveTitle: 'Arquivo de Notícias',
+    tagArchiveDesc: 'Artigos e cobertura em tempo real com a tag #',
+    articlesTaggedText: 'artigos publicados',
+    allArchivesText: 'Arquivo Completo',
+    topicsHeading: 'TÓPICOS',
+    regionArchiveTitle: 'Notícias & Análises',
+    regionArchiveDesc: 'Cobertura completa, sub-tópicos e notícias em tempo real sobre '
   }
 };
 
@@ -288,9 +302,11 @@ function mapSupabaseRow(row, lang = 'en') {
     ? new Date(row.created_at).toISOString()
     : (row.time ? new Date(row.time).toISOString() : new Date().toISOString());
 
-  const tags = row.tag
-    ? (Array.isArray(row.tag) ? row.tag : String(row.tag).split(/[,\s#]+/).filter(Boolean))
-    : extractTagsFromContent(title, content);
+  const rawTagSource = row.tag || row.tags || row.hashtags;
+  const parsedTags = rawTagSource
+    ? parseTags(rawTagSource)
+    : extractTagsFromContent(title, content).map(t => ({ label: t.charAt(0).toUpperCase() + t.slice(1), slug: toTagSlug(t) }));
+  const tags = parsedTags.map(t => t.slug);
 
   return {
     id: String(row.id),
@@ -304,6 +320,7 @@ function mapSupabaseRow(row, lang = 'en') {
     hook,
     score,
     time,
+    parsedTags,
     tags,
     link: row.source_url || row.link || '',
     source_name: row.source_name || '',
@@ -352,7 +369,7 @@ function parseLocalizedArticles(rawArticles) {
   const ptById = new Map();
 
   rawArticles.forEach(row => {
-    if (!row) return;
+    if (!row || !isValidArticleRecord(row)) return;
 
     // Pattern A: Nested .en and/or .pt objects
     if (row.en || row.pt) {
@@ -366,6 +383,7 @@ function parseLocalizedArticles(rawArticles) {
         const body = extractBody(content, title);
         let slug = d.slug || toSlug(title);
         if (slugMapEn[slug]) slug = `${slug}-${row.id}`;
+        const enParsedTags = d.parsedTags || parseTags(d.tag || d.tags || extractTagsFromContent(title, content));
         enPost = {
           id: String(row.id),
           lang: 'en',
@@ -377,7 +395,8 @@ function parseLocalizedArticles(rawArticles) {
           hook: d.hook || row.hook || '',
           time: d.time || row.time || new Date().toISOString(),
           score: d.score || row.score || 7,
-          tags: d.tags || extractTagsFromContent(title, content)
+          parsedTags: enParsedTags,
+          tags: enParsedTags.map(t => t.slug)
         };
         slugMapEn[slug] = enPost;
         enPosts.push(enPost);
@@ -391,6 +410,7 @@ function parseLocalizedArticles(rawArticles) {
         const body = extractBody(content, title);
         let slug = d.slug || toSlug(title);
         if (slugMapPt[slug]) slug = `${slug}-${row.id}`;
+        const ptParsedTags = d.parsedTags || parseTags(d.tag || d.tags || extractTagsFromContent(title, content));
         ptPost = {
           id: String(row.id),
           lang: 'pt',
@@ -402,7 +422,8 @@ function parseLocalizedArticles(rawArticles) {
           hook: d.hook || row.hook || '',
           time: d.time || row.time || new Date().toISOString(),
           score: d.score || row.score || 7,
-          tags: d.tags || extractTagsFromContent(title, content)
+          parsedTags: ptParsedTags,
+          tags: ptParsedTags.map(t => t.slug)
         };
         slugMapPt[slug] = ptPost;
         ptPosts.push(ptPost);
@@ -434,6 +455,9 @@ function parseLocalizedArticles(rawArticles) {
       let ptSlug = toSlug(ptTitle);
       if (slugMapPt[ptSlug]) ptSlug = `${ptSlug}-${row.id}`;
 
+      const enParsedTags = row.parsedTags || parseTags(row.tags_en || row.tag || row.tags || extractTagsFromContent(enTitle, enContent));
+      const ptParsedTags = row.parsedTags || parseTags(row.tags_pt || row.tag || row.tags || extractTagsFromContent(ptTitle, ptContent));
+
       const enPost = {
         id: String(row.id),
         lang: 'en',
@@ -445,7 +469,8 @@ function parseLocalizedArticles(rawArticles) {
         hook: row.hook_en || row.hook || '',
         time: row.time || new Date().toISOString(),
         score: row.score || 7,
-        tags: row.tags_en || row.tags || extractTagsFromContent(enTitle, enContent)
+        parsedTags: enParsedTags,
+        tags: enParsedTags.map(t => t.slug)
       };
 
       const ptPost = {
@@ -459,7 +484,8 @@ function parseLocalizedArticles(rawArticles) {
         hook: row.hook_pt || row.hook || '',
         time: row.time || new Date().toISOString(),
         score: row.score || 7,
-        tags: row.tags_pt || row.tags || extractTagsFromContent(ptTitle, ptContent)
+        parsedTags: ptParsedTags,
+        tags: ptParsedTags.map(t => t.slug)
       };
 
       enPost.translation = ptPost;
@@ -480,6 +506,7 @@ function parseLocalizedArticles(rawArticles) {
     const rawTitle = row.title_pt || row.headline_pt || row.title_en || row.headline_en || row.headline || row.title;
     const title = (rawTitle && rawTitle !== 'Untitled' ? rawTitle : extractTitle(content)).replace(/\*\*/g, '').trim();
     const body = extractBody(content, title);
+    const parsedTags = row.parsedTags || parseTags(row.tag || row.tags || extractTagsFromContent(title, content));
 
     if (isPtOnly) {
       let slug = toSlug(title);
@@ -503,7 +530,8 @@ function parseLocalizedArticles(rawArticles) {
         hook: row.hook || '',
         time: row.time || new Date().toISOString(),
         score: row.score || 7,
-        tags: row.tags || extractTagsFromContent(title, content),
+        parsedTags,
+        tags: parsedTags.map(t => t.slug),
         pairId: row.pair_id || row.translation_of || null,
         translation: null
       };
@@ -532,7 +560,8 @@ function parseLocalizedArticles(rawArticles) {
         hook: row.hook || '',
         time: row.time || new Date().toISOString(),
         score: row.score || 7,
-        tags: row.tags || extractTagsFromContent(title, content),
+        parsedTags,
+        tags: parsedTags.map(t => t.slug),
         pairId: row.pair_id || row.translation_of || null,
         translation: null
       };
@@ -566,6 +595,9 @@ function parseLocalizedArticles(rawArticles) {
       }
     }
   });
+
+  enPosts.forEach(p => { p.region = getRegionForArticle(p); });
+  ptPosts.forEach(p => { p.region = getRegionForArticle(p); });
 
   return { enPosts, ptPosts, slugMapEn, slugMapPt };
 }
@@ -687,7 +719,11 @@ function generateArticlePage(post, template, lang) {
   html = html.replace(/\{\{JSON_LD_ARTICLE\}\}/g, () => jsonLdArticle);
   html = html.replace(/\{\{BREADCRUMB\}\}/g, () => breadcrumb);
   html = html.replace(/\{\{ARTICLE_TITLE\}\}/g, () => esc(post.title));
+  const postParsedTags = post.parsedTags || parseTags(post.tags);
+  const articleTagsHtml = formatTagPillsHtml(postParsedTags, lang);
+
   html = html.replace(/\{\{ARTICLE_BODY\}\}/g, () => articleBodyHtml);
+  html = html.replace(/\{\{ARTICLE_TAGS\}\}/g, () => articleTagsHtml);
   html = html.replace(/\{\{SOURCE_BUTTON\}\}/g, () => sourceBtn);
   html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfigArticle);
 
@@ -703,6 +739,172 @@ function generateArticlePage(post, template, lang) {
   html = html.replace(/\{\{SECTION_LATEST_NEWS\}\}/g, () => dict.sectionLatestNews);
   html = html.replace(/\{\{MORE_NEWS_TEXT\}\}/g, () => dict.moreNews);
   html = html.replace(/\{\{BACK_TO_NEWS_TEXT\}\}/g, () => dict.backToNews);
+  html = html.replace(/\{\{FOOTER_UPDATED\}\}/g, () => dict.footerUpdated);
+  html = html.replace(/\{\{FOOTER_PRIVACY_URL\}\}/g, () => `/${lang}/privacy`);
+  html = html.replace(/\{\{FOOTER_PRIVACY_TEXT\}\}/g, () => dict.footerPrivacy);
+
+  html = html.replace(/\?v=[0-9.]+/g, () => '?v=' + VERSION);
+
+  return html;
+}
+
+// ── Generate Tag Archive HTML ──────────────────────────────
+function generateTagArchivePage(tagEntry, template, lang, groupedTags, topTags, otherLangTagMap) {
+  const dict = I18N[lang];
+  const canonicalUrl = `${CONFIG.baseUrl}/${lang}/tag/${tagEntry.slug}`;
+  const ogImage = CONFIG.baseUrl + CONFIG.defaultOgImage;
+  const tagLabel = tagEntry.label;
+  const pageTitle = `#${tagLabel} – ${dict.tagArchiveTitle} | BBN – Bitcoin Brasil News`;
+  const pageDesc = `${dict.tagArchiveDesc}${tagLabel}. ${tagEntry.articles.length} ${dict.articlesTaggedText}.`;
+
+  // Bidirectional hreflang calculation
+  let enUrl = null;
+  let ptUrl = null;
+  if (lang === 'en') {
+    enUrl = canonicalUrl;
+    if (otherLangTagMap && otherLangTagMap.has(tagEntry.slug)) {
+      ptUrl = `${CONFIG.baseUrl}/pt/tag/${tagEntry.slug}`;
+    }
+  } else {
+    ptUrl = canonicalUrl;
+    if (otherLangTagMap && otherLangTagMap.has(tagEntry.slug)) {
+      enUrl = `${CONFIG.baseUrl}/en/tag/${tagEntry.slug}`;
+    }
+  }
+  const hreflangTags = buildHreflangTags(enUrl, ptUrl);
+
+  const langEnUrl = enUrl || `${CONFIG.baseUrl}/en/archive`;
+  const langPtUrl = ptUrl || `${CONFIG.baseUrl}/pt/archive`;
+  const langEnActive = lang === 'en' ? ' active' : '';
+  const langPtActive = lang === 'pt' ? ' active' : '';
+
+  const parentRegion = getRegionForTag(tagEntry.slug);
+  const isPt = lang === 'pt';
+  const prefix = isPt ? 'regiao' : 'region';
+  const regSlug = isPt ? parentRegion.slugPt : parentRegion.slugEn;
+  const regLabel = isPt ? parentRegion.labelPt : parentRegion.labelEn;
+  const parentBreadcrumb = `<a href="/${lang}/${prefix}/${regSlug}">${esc(regLabel)}</a> <span>›</span> `;
+
+  const regionalNavHtml = formatRegionalNavHtml({
+    groupedTags,
+    topTags,
+    activeRegionId: parentRegion.id,
+    activeTagSlug: tagEntry.slug,
+    lang
+  });
+  const archiveGridHtml = generateArchiveGrid(tagEntry.articles, lang);
+
+  const bbnConfig = JSON.stringify({
+    url: CONFIG.supabaseUrl,
+    key: CONFIG.supabaseKey
+  });
+
+  let html = template;
+  html = html.replace(/\{\{HTML_LANG\}\}/g, () => dict.htmlLang);
+  html = html.replace(/\{\{PAGE_TITLE\}\}/g, () => esc(pageTitle));
+  html = html.replace(/\{\{PAGE_DESCRIPTION\}\}/g, () => esc(pageDesc));
+  html = html.replace(/\{\{CANONICAL_URL\}\}/g, () => canonicalUrl);
+  html = html.replace(/\{\{HREFLANG_TAGS\}\}/g, () => hreflangTags);
+  html = html.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
+  html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfig);
+
+  html = html.replace(/\{\{TAG_LABEL\}\}/g, () => esc(tagLabel));
+  html = html.replace(/\{\{TAG_ARTICLE_COUNT\}\}/g, () => String(tagEntry.articles.length));
+  html = html.replace(/\{\{PARENT_REGION_BREADCRUMB\}\}/g, () => parentBreadcrumb);
+  html = html.replace(/\{\{TAG_CLOUD\}\}/g, () => regionalNavHtml);
+  html = html.replace(/\{\{ARCHIVE_GRID\}\}/g, () => archiveGridHtml);
+
+  // Switcher & Navigation
+  html = html.replace(/\{\{LANG_EN_URL\}\}/g, () => langEnUrl);
+  html = html.replace(/\{\{LANG_PT_URL\}\}/g, () => langPtUrl);
+  html = html.replace(/\{\{LANG_EN_ACTIVE\}\}/g, () => langEnActive);
+  html = html.replace(/\{\{LANG_PT_ACTIVE\}\}/g, () => langPtActive);
+  html = html.replace(/\{\{NAV_HOME_URL\}\}/g, () => `/${lang}/`);
+  html = html.replace(/\{\{NAV_HOME_TEXT\}\}/g, () => dict.navHome);
+  html = html.replace(/\{\{NAV_ARCHIVE_URL\}\}/g, () => `/${lang}/archive`);
+  html = html.replace(/\{\{NAV_ARCHIVE_TEXT\}\}/g, () => dict.navArchive);
+  html = html.replace(/\{\{ALL_ARCHIVES_TEXT\}\}/g, () => dict.allArchivesText);
+  html = html.replace(/\{\{ARTICLES_PUBLISHED_TEXT\}\}/g, () => dict.articlesTaggedText);
+  html = html.replace(/\{\{SEARCH_PLACEHOLDER\}\}/g, () => dict.searchPlaceholder);
+  html = html.replace(/\{\{PERIOD_ALL_TIME\}\}/g, () => dict.periodAll);
+  html = html.replace(/\{\{PERIOD_TODAY\}\}/g, () => dict.periodToday);
+  html = html.replace(/\{\{PERIOD_WEEK\}\}/g, () => dict.periodWeek);
+  html = html.replace(/\{\{PERIOD_MONTH\}\}/g, () => dict.periodMonth);
+  html = html.replace(/\{\{FOOTER_UPDATED\}\}/g, () => dict.footerUpdated);
+  html = html.replace(/\{\{FOOTER_PRIVACY_URL\}\}/g, () => `/${lang}/privacy`);
+  html = html.replace(/\{\{FOOTER_PRIVACY_TEXT\}\}/g, () => dict.footerPrivacy);
+
+  html = html.replace(/\?v=[0-9.]+/g, () => '?v=' + VERSION);
+
+  return html;
+}
+
+// ── Generate Region Archive HTML ────────────────────────────
+function generateRegionArchivePage(region, template, lang, groupedTags, topTags, articles, otherTagMap) {
+  const dict = I18N[lang];
+  const isPt = lang === 'pt';
+  const prefix = isPt ? 'regiao' : 'region';
+  const regSlug = isPt ? region.slugPt : region.slugEn;
+  const regLabel = isPt ? region.labelPt : region.labelEn;
+  const canonicalUrl = `${CONFIG.baseUrl}/${lang}/${prefix}/${regSlug}`;
+  const pageTitle = `${regLabel} – ${dict.regionArchiveTitle} | BBN – Bitcoin Brasil News`;
+  const pageDesc = `${dict.regionArchiveDesc}${regLabel}. ${articles.length} ${dict.articlesTaggedText}.`;
+
+  // Bidirectional hreflang
+  let enUrl = `${CONFIG.baseUrl}/en/region/${region.slugEn}`;
+  let ptUrl = `${CONFIG.baseUrl}/pt/regiao/${region.slugPt}`;
+  const hreflangTags = buildHreflangTags(enUrl, ptUrl);
+
+  const langEnUrl = enUrl;
+  const langPtUrl = ptUrl;
+  const langEnActive = lang === 'en' ? ' active' : '';
+  const langPtActive = lang === 'pt' ? ' active' : '';
+
+  const regionalNavHtml = formatRegionalNavHtml({
+    groupedTags,
+    topTags,
+    activeRegionId: region.id,
+    activeTagSlug: null,
+    lang
+  });
+
+  const archiveGridHtml = generateArchiveGrid(articles, lang);
+
+  const bbnConfig = JSON.stringify({
+    url: CONFIG.supabaseUrl,
+    key: CONFIG.supabaseKey
+  });
+
+  let html = template;
+  html = html.replace(/\{\{HTML_LANG\}\}/g, () => dict.htmlLang);
+  html = html.replace(/\{\{PAGE_TITLE\}\}/g, () => esc(pageTitle));
+  html = html.replace(/\{\{PAGE_DESCRIPTION\}\}/g, () => esc(pageDesc));
+  html = html.replace(/\{\{CANONICAL_URL\}\}/g, () => canonicalUrl);
+  html = html.replace(/\{\{HREFLANG_TAGS\}\}/g, () => hreflangTags);
+  html = html.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
+  html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfig);
+
+  html = html.replace(/\{\{REGION_LABEL\}\}/g, () => esc(regLabel));
+  html = html.replace(/\{\{REGION_ARTICLE_COUNT\}\}/g, () => String(articles.length));
+  html = html.replace(/\{\{REGIONAL_NAV\}\}/g, () => regionalNavHtml);
+  html = html.replace(/\{\{ARCHIVE_GRID\}\}/g, () => archiveGridHtml);
+
+  // Switcher & Navigation
+  html = html.replace(/\{\{LANG_EN_URL\}\}/g, () => langEnUrl);
+  html = html.replace(/\{\{LANG_PT_URL\}\}/g, () => langPtUrl);
+  html = html.replace(/\{\{LANG_EN_ACTIVE\}\}/g, () => langEnActive);
+  html = html.replace(/\{\{LANG_PT_ACTIVE\}\}/g, () => langPtActive);
+  html = html.replace(/\{\{NAV_HOME_URL\}\}/g, () => `/${lang}/`);
+  html = html.replace(/\{\{NAV_HOME_TEXT\}\}/g, () => dict.navHome);
+  html = html.replace(/\{\{NAV_ARCHIVE_URL\}\}/g, () => `/${lang}/archive`);
+  html = html.replace(/\{\{NAV_ARCHIVE_TEXT\}\}/g, () => dict.navArchive);
+  html = html.replace(/\{\{ALL_ARCHIVES_TEXT\}\}/g, () => dict.allArchivesText);
+  html = html.replace(/\{\{ARTICLES_PUBLISHED_TEXT\}\}/g, () => dict.articlesTaggedText);
+  html = html.replace(/\{\{SEARCH_PLACEHOLDER\}\}/g, () => dict.searchPlaceholder);
+  html = html.replace(/\{\{PERIOD_ALL_TIME\}\}/g, () => dict.periodAll);
+  html = html.replace(/\{\{PERIOD_TODAY\}\}/g, () => dict.periodToday);
+  html = html.replace(/\{\{PERIOD_WEEK\}\}/g, () => dict.periodWeek);
+  html = html.replace(/\{\{PERIOD_MONTH\}\}/g, () => dict.periodMonth);
   html = html.replace(/\{\{FOOTER_UPDATED\}\}/g, () => dict.footerUpdated);
   html = html.replace(/\{\{FOOTER_PRIVACY_URL\}\}/g, () => `/${lang}/privacy`);
   html = html.replace(/\{\{FOOTER_PRIVACY_TEXT\}\}/g, () => dict.footerPrivacy);
@@ -771,10 +973,11 @@ function generateArchiveGrid(articles, lang = 'en') {
     }
 
     const tagsAttr = a.tags && a.tags.length > 0 ? ` data-tags="${esc(a.tags.join(','))}"` : ' data-tags=""';
+    const regionAttr = a.region ? ` data-region="${esc(a.region.id)}"` : '';
     const readText = lang === 'pt' ? 'Ler' : 'Read';
 
     return `
-<a href="/${lang}/news/${a.slug}" class="bbn-archive-row"${tagsAttr} data-time="${a.time}" data-title="${esc(a.title).toLowerCase()}">
+<a href="/${lang}/news/${a.slug}" class="bbn-archive-row"${tagsAttr}${regionAttr} data-time="${a.time}" data-title="${esc(a.title).toLowerCase()}">
   <div class="bbn-meta">
     <span class="bbn-badge-impact ${badgeClass}">${badge}</span>
     <span class="bbn-date">${dateFormatted}</span>
@@ -809,7 +1012,7 @@ function generateFiltersHtml(articles, lang = 'en') {
 }
 
 // ── Generate Homepage HTML ─────────────────────────────────
-function generateHomePage(articles, template, lang = 'en') {
+function generateHomePage(articles, template, lang = 'en', tagCloudHtml = '') {
   const dict = I18N[lang];
   const canonicalUrl = `${CONFIG.baseUrl}/${lang}/`;
   const enUrl = `${CONFIG.baseUrl}/en/`;
@@ -834,7 +1037,8 @@ function generateHomePage(articles, template, lang = 'en') {
   html = html.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
   html = html.replace(/\{\{LOCALE\}\}/g, () => lang);
   html = html.replace(/\{\{ARTICLE_INDEX\}\}/g, () => articleIndex);
-  html = html.replace(/\{\{BBN_CONFIG\}\}/g, () => bbnConfig);
+  html = html.replace(/\{\{TAG_CLOUD\}\}/g, () => '');
+  html = html.replace(/\{\{FILTERS\}\}/g, () => '');
 
   // Switcher & Navigation
   html = html.replace(/\{\{LANG_EN_URL\}\}/g, () => '/en/');
@@ -1024,7 +1228,7 @@ function detectTickers(title, tags) {
 }
 
 // ── Generate Sitemap.xml (Multilingual) ────────────────────
-function generateSitemap(enArticles, ptArticles, baseUrl) {
+function generateSitemap(enArticles, ptArticles, baseUrl, enTagsMap = new Map(), ptTagsMap = new Map()) {
   const now = new Date().toISOString().split('T')[0];
   const defaultImage = `${baseUrl}/assets/og-default.png`;
 
@@ -1117,11 +1321,70 @@ function generateSitemap(enArticles, ptArticles, baseUrl) {
   const enNewsEntries = buildNewsEntries(enArticles, 'en');
   const ptNewsEntries = buildNewsEntries(ptArticles, 'pt');
 
+  // Tag archive entries
+  const buildTagEntries = (tagMap, lang, otherTagMap) => {
+    const isEn = lang === 'en';
+    const thisHreflang = isEn ? 'en' : 'pt-BR';
+    const otherHreflang = isEn ? 'pt-BR' : 'en';
+    const otherLang = isEn ? 'pt' : 'en';
+
+    let tagXml = '';
+    for (const [tagSlug, tagEntry] of tagMap) {
+      const tagUrl = `${baseUrl}/${lang}/tag/${tagSlug}`;
+      let alternateLinkBlock = '';
+      if (otherTagMap && otherTagMap.has(tagSlug)) {
+        const otherUrl = `${baseUrl}/${otherLang}/tag/${tagSlug}`;
+        alternateLinkBlock += `\n    <xhtml:link rel="alternate" hreflang="${otherHreflang}" href="${otherUrl}" />`;
+      }
+      alternateLinkBlock += `\n    <xhtml:link rel="alternate" hreflang="${thisHreflang}" href="${tagUrl}" />`;
+      alternateLinkBlock += `\n    <xhtml:link rel="alternate" hreflang="x-default" href="${baseUrl}/en/tag/${tagSlug}" />`;
+
+      tagXml += `
+  <url>
+    <loc>${tagUrl}</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.7</priority>${alternateLinkBlock}
+  </url>`;
+    }
+    return tagXml;
+  };
+
+  const enTagEntries = buildTagEntries(enTagsMap, 'en', ptTagsMap);
+  const ptTagEntries = buildTagEntries(ptTagsMap, 'pt', enTagsMap);
+
+  // Regional archive entries
+  let regionXml = '';
+  for (const reg of Object.values(REGIONAL_TAXONOMY)) {
+    const enRegUrl = `${baseUrl}/en/region/${reg.slugEn}`;
+    const ptRegUrl = `${baseUrl}/pt/regiao/${reg.slugPt}`;
+
+    regionXml += `
+  <url>
+    <loc>${enRegUrl}</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="en" href="${enRegUrl}" />
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="${ptRegUrl}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${enRegUrl}" />
+  </url>
+  <url>
+    <loc>${ptRegUrl}</loc>
+    <lastmod>${now}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="${ptRegUrl}" />
+    <xhtml:link rel="alternate" hreflang="en" href="${enRegUrl}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${enRegUrl}" />
+  </url>`;
+  }
+
   return `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
         xmlns:news="http://www.google.com/schemas/sitemap-news/0.9"
         xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"
-        xmlns:xhtml="http://www.w3.org/1999/xhtml">${staticEntries}${enNewsEntries}${ptNewsEntries}
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">${staticEntries}${regionXml}${enTagEntries}${ptTagEntries}${enNewsEntries}${ptNewsEntries}
 </urlset>`;
 }
 
@@ -1197,7 +1460,7 @@ async function build() {
   let dbArticles = [];
   if (existsSync(DB_FILE)) {
     try {
-      dbArticles = JSON.parse(readFileSync(DB_FILE, 'utf-8'));
+      dbArticles = JSON.parse(readFileSync(DB_FILE, 'utf-8')).filter(isValidArticleRecord);
       console.log(`📦 Loaded ${dbArticles.length} articles from local database`);
     } catch (e) {
       console.warn(`⚠️ Failed to load local database: ${e.message}`);
@@ -1215,14 +1478,14 @@ async function build() {
     ]);
 
     if (results[0].status === 'fulfilled') {
-      enFetched = results[0].value.map(row => mapSupabaseRow(row, 'en'));
+      enFetched = results[0].value.map(row => mapSupabaseRow(row, 'en')).filter(isValidArticleRecord);
       console.log(`✅ [English Pipeline] Fetched ${enFetched.length} articles from "articles"`);
     } else {
       console.warn(`⚠️ [English Pipeline] Warning: ${results[0].reason?.message}`);
     }
 
     if (results[1].status === 'fulfilled') {
-      ptFetched = results[1].value.map(row => mapSupabaseRow(row, 'pt'));
+      ptFetched = results[1].value.map(row => mapSupabaseRow(row, 'pt')).filter(isValidArticleRecord);
       console.log(`✅ [Portuguese Pipeline] Fetched ${ptFetched.length} articles from "artigos"`);
     } else {
       console.warn(`⚠️ [Portuguese Pipeline] Warning: ${results[1].reason?.message}`);
@@ -1235,16 +1498,16 @@ async function build() {
   // Merge articles: prioritize fresh fetches but preserve local database records
   const articleMap = new Map();
   dbArticles.forEach(item => {
-    if (item && item.id) articleMap.set(`${item.lang || 'en'}-${item.id}`, item);
+    if (item && item.id && isValidArticleRecord(item)) articleMap.set(`${item.lang || 'en'}-${item.id}`, item);
   });
   enFetched.forEach(item => {
-    if (item && item.id) articleMap.set(`en-${item.id}`, item);
+    if (item && item.id && isValidArticleRecord(item)) articleMap.set(`en-${item.id}`, item);
   });
   ptFetched.forEach(item => {
-    if (item && item.id) articleMap.set(`pt-${item.id}`, item);
+    if (item && item.id && isValidArticleRecord(item)) articleMap.set(`pt-${item.id}`, item);
   });
 
-  const mergedArticles = Array.from(articleMap.values());
+  const mergedArticles = Array.from(articleMap.values()).filter(isValidArticleRecord);
   mergedArticles.sort((a, b) => new Date(b.time) - new Date(a.time));
 
   // Save updated database locally
@@ -1275,6 +1538,8 @@ async function build() {
   const homeTemplate = readFileSync(join(__dirname, 'template-home.html'), 'utf-8');
   const articleTemplate = readFileSync(join(__dirname, 'template-article.html'), 'utf-8');
   const archiveTemplate = readFileSync(join(__dirname, 'template-archive.html'), 'utf-8');
+  const tagTemplate = readFileSync(join(__dirname, 'template-tag.html'), 'utf-8');
+  const regionTemplate = readFileSync(join(__dirname, 'template-region.html'), 'utf-8');
   const privacyTemplate = readFileSync(join(__dirname, 'template-privacy.html'), 'utf-8');
 
   // 6. Prepare dist directory structure (wipe legacy builds first)
@@ -1287,8 +1552,10 @@ async function build() {
   ensureDir(join(DIST_DIR, 'assets', 'js'));
   ensureDir(join(DIST_DIR, 'en'));
   ensureDir(join(DIST_DIR, 'en', 'news'));
+  ensureDir(join(DIST_DIR, 'en', 'tag'));
   ensureDir(join(DIST_DIR, 'pt'));
   ensureDir(join(DIST_DIR, 'pt', 'news'));
+  ensureDir(join(DIST_DIR, 'pt', 'tag'));
 
   // 7. Copy static assets
   const staticFiles = ['style.css', 'app.js'];
@@ -1330,6 +1597,26 @@ async function build() {
   writeFileSync(join(DIST_DIR, 'index.html'), generateRootIndexHtml(), 'utf-8');
   console.log('🌐 Generated dist/index.html (Intelligent Client-Side Language Router)');
 
+  // Build tag maps per locale for dynamic SSG routes & tag clouds
+  const buildTagMap = (articles) => {
+    const map = new Map();
+    articles.forEach(post => {
+      const pTags = post.parsedTags || parseTags(post.tags);
+      pTags.forEach(t => {
+        if (!map.has(t.slug)) {
+          map.set(t.slug, { label: t.label, slug: t.slug, count: 0, articles: [] });
+        }
+        const entry = map.get(t.slug);
+        entry.count++;
+        entry.articles.push(post);
+      });
+    });
+    return map;
+  };
+
+  const enTagsMap = buildTagMap(enPosts);
+  const ptTagsMap = buildTagMap(ptPosts);
+
   // 9. Generate Localized Pages for /en/ and /pt/
   const locales = [
     { lang: 'en', articles: enPosts, homepage: enHomepage, privacyBody: PRIVACY_BODY_EN },
@@ -1344,10 +1631,21 @@ async function build() {
     const locDir = join(DIST_DIR, lang);
     const otherLang = lang === 'en' ? 'pt' : 'en';
 
-    // A. Homepage (/en/index.html, /pt/index.html)
-    const filtersHtml = generateFiltersHtml(homepage.length > 0 ? homepage : articles.slice(0, 60), lang);
-    let homeHtml = generateHomePage(homepage.length > 0 ? homepage : articles.slice(0, 60), homeTemplate, lang);
-    homeHtml = homeHtml.replace(/\{\{FILTERS\}\}/g, () => filtersHtml);
+    const currentTagMap = lang === 'en' ? enTagsMap : ptTagsMap;
+    const otherTagMap = lang === 'en' ? ptTagsMap : enTagsMap;
+    const allTags = Array.from(currentTagMap.values());
+    const topTags = allTags.slice().sort((a, b) => b.count - a.count);
+    const groupedTags = groupTagsByRegion(allTags);
+
+    const regionalNavHtml = formatRegionalNavHtml({
+      groupedTags,
+      topTags,
+      activeRegionId: 'all',
+      lang
+    });
+
+    // A. Homepage (/en/index.html, /pt/index.html) — Pure live feed without tag links
+    let homeHtml = generateHomePage(homepage.length > 0 ? homepage : articles.slice(0, 60), homeTemplate, lang, '');
     writeFileSync(join(locDir, 'index.html'), homeHtml, 'utf-8');
 
     // B. Archive Pages (/en/archive.html, /en/archive/index.html)
@@ -1386,8 +1684,8 @@ async function build() {
     archiveHtml = archiveHtml.replace(/\{\{FOOTER_PRIVACY_URL\}\}/g, () => `/${lang}/privacy`);
     archiveHtml = archiveHtml.replace(/\{\{FOOTER_PRIVACY_TEXT\}\}/g, () => dict.footerPrivacy);
 
-    const archiveFiltersHtml = generateFiltersHtml(articles, lang);
-    archiveHtml = archiveHtml.replace(/\{\{FILTERS\}\}/g, () => archiveFiltersHtml);
+    archiveHtml = archiveHtml.replace(/\{\{TAG_CLOUD\}\}/g, () => regionalNavHtml);
+    archiveHtml = archiveHtml.replace(/\{\{FILTERS\}\}/g, () => regionalNavHtml);
     const archiveGridHtml = generateArchiveGrid(articles, lang);
     archiveHtml = archiveHtml.replace(/\{\{ARCHIVE_GRID\}\}/g, () => archiveGridHtml);
     archiveHtml = archiveHtml.replace(/\?v=[0-9.]+/g, () => '?v=' + VERSION);
@@ -1397,7 +1695,46 @@ async function build() {
     ensureDir(archiveDir);
     writeFileSync(join(archiveDir, 'index.html'), archiveHtml, 'utf-8');
 
-    // C. Privacy Policy Pages (/en/privacy.html, /en/privacy/index.html)
+    // C. Tag Archive Pages (/lang/tag/[slug]/index.html)
+    let tagsBuilt = 0;
+    for (const [tagSlug, tagEntry] of currentTagMap) {
+      const tagPageHtml = generateTagArchivePage(tagEntry, tagTemplate, lang, groupedTags, topTags, otherTagMap);
+      const tagDir = join(locDir, 'tag', tagSlug);
+      ensureDir(tagDir);
+      writeFileSync(join(tagDir, 'index.html'), tagPageHtml, 'utf-8');
+      tagsBuilt++;
+    }
+    console.log(`🏷️  Generated ${tagsBuilt} tag archive pages for /${lang}/tag/`);
+
+    // D. Regional Archive Pages (/pt/regiao/[slug]/index.html or /en/region/[slug]/index.html)
+    const regionPrefix = lang === 'pt' ? 'regiao' : 'region';
+    const regionBaseDir = join(locDir, regionPrefix);
+    ensureDir(regionBaseDir);
+
+    let regionsBuilt = 0;
+    for (const region of Object.values(REGIONAL_TAXONOMY)) {
+      const regSlug = lang === 'pt' ? region.slugPt : region.slugEn;
+      const regArticles = articles.filter(a => a.region && a.region.id === region.id);
+
+      const regionPageHtml = generateRegionArchivePage(
+        region,
+        regionTemplate,
+        lang,
+        groupedTags,
+        topTags,
+        regArticles,
+        otherTagMap
+      );
+
+      const regDir = join(regionBaseDir, regSlug);
+      ensureDir(regDir);
+      writeFileSync(join(regDir, 'index.html'), regionPageHtml, 'utf-8');
+      regionsBuilt++;
+    }
+    console.log(`🌍 Generated ${regionsBuilt} regional archive pages for /${lang}/${regionPrefix}/`);
+    console.log(`🏷️  Generated ${tagsBuilt} tag archive pages for /${lang}/tag/`);
+
+    // D. Privacy Policy Pages (/en/privacy.html, /en/privacy/index.html)
     let privHtml = privacyTemplate;
     const enPrivUrl = `${CONFIG.baseUrl}/en/privacy`;
     const ptPrivUrl = `${CONFIG.baseUrl}/pt/privacy`;
@@ -1433,14 +1770,12 @@ async function build() {
     ensureDir(privDir);
     writeFileSync(join(privDir, 'index.html'), privHtml, 'utf-8');
 
-    // D. Article Pages (/lang/news/[slug].html & /lang/news/[slug]/index.html)
+    // E. Article Pages (/lang/news/[slug].html & /lang/news/[slug]/index.html)
     let articlesBuilt = 0;
     for (const post of articles) {
       const artHtml = generateArticlePage(post, articleTemplate, lang);
 
-      // Write both [slug].html and [slug]/index.html for universal server support
-      writeFileSync(join(locDir, 'news', `${post.slug}.html`), artHtml, 'utf-8');
-
+      // Clean directory-based URL structure for native server resolution
       const artCleanDir = join(locDir, 'news', post.slug);
       ensureDir(artCleanDir);
       writeFileSync(join(artCleanDir, 'index.html'), artHtml, 'utf-8');
@@ -1452,9 +1787,9 @@ async function build() {
   }
 
   // 10. Generate Multilingual Sitemap.xml
-  const sitemapXml = generateSitemap(enPosts, ptPosts, CONFIG.baseUrl);
+  const sitemapXml = generateSitemap(enPosts, ptPosts, CONFIG.baseUrl, enTagsMap, ptTagsMap);
   writeFileSync(join(DIST_DIR, 'sitemap.xml'), sitemapXml, 'utf-8');
-  console.log(`🗺️  Generated sitemap.xml (${enPosts.length + ptPosts.length + 6} URLs — dual /en/ & /pt/ namespaces)`);
+  console.log(`🗺️  Generated sitemap.xml (${enPosts.length + ptPosts.length + enTagsMap.size + ptTagsMap.size + 6} URLs — dual /en/ & /pt/ namespaces)`);
 
   // 11. Generate Localized RSS 2.0 Feeds
   const enRss = generateRssFeed(enPosts, CONFIG.baseUrl, 'en', 'feed.xml');
@@ -1481,14 +1816,23 @@ async function build() {
 /en/archive     /en/archive/index.html     200
 /pt/archive     /pt/archive/index.html     200
 
-/en/news/*      /en/news/:splat/index.html 200
-/pt/news/*      /pt/news/:splat/index.html 200
+# Legacy URL fallbacks for backwards compatibility (301 before 200 catch-alls)
+/privacy        /en/privacy/               301
+/archive        /en/archive/               301
+/news/*         /en/news/:splat            301
+/noticia/*      /pt/news/:splat            301
 
-# Legacy URL fallbacks for backwards compatibility
-/privacy        /en/privacy/index.html     301
-/archive        /en/archive/index.html     301
-/news/*         /en/news/:splat/index.html 301
-/noticia/*      /pt/news/:splat/index.html 301
+# SPA Routing Fallback (200 Rewrite)
+# Serves language SPA shell if pre-rendered static index.html does not exist on disk
+/pt/regiao/*    /pt/index.html  200
+/pt/tag/*       /pt/index.html  200
+/pt/news/*      /pt/index.html  200
+/pt/*           /pt/index.html  200
+/en/region/*    /en/index.html  200
+/en/tag/*       /en/index.html  200
+/en/news/*      /en/index.html  200
+/en/*           /en/index.html  200
+/*              /index.html     200
 `;
   writeFileSync(join(DIST_DIR, '_redirects'), redirectsContent, 'utf-8');
   console.log('🔀 Generated _redirects (Netlify language detection & routing rules)');
@@ -1517,13 +1861,13 @@ map $http_accept_language $preferred_lang {
 #         return 302 /$preferred_lang/;
 #     }
 #
-#     # Static subdirectories for /en/ and /pt/
+#     # Static subdirectories for /en/ and /pt/ with clean URL index & SPA fallback
 #     location /en/ {
-#         try_files $uri $uri/ $uri.html /en/index.html;
+#         try_files $uri $uri/ $uri/index.html $uri.html /en/index.html;
 #     }
 #
 #     location /pt/ {
-#         try_files $uri $uri/ $uri.html /pt/index.html;
+#         try_files $uri $uri/ $uri/index.html $uri.html /pt/index.html;
 #     }
 #
 #     # Legacy redirect rules

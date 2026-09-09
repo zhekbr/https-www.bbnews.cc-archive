@@ -1,0 +1,88 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "cleanUrls": true,
+  "trailingSlash": false,
+  "rewrites": [
+    {
+      "source": "/pt/tag/:slug*",
+      "destination": "/pt/index.html"
+    },
+    {
+      "source": "/en/tag/:slug*",
+      "destination": "/en/index.html"
+    },
+    {
+      "source": "/pt/regiao/:slug*",
+      "destination": "/pt/index.html"
+    },
+    {
+      "source": "/en/region/:slug*",
+      "destination": "/en/index.html"
+    },
+    {
+      "source": "/pt/news/:slug*",
+      "destination": "/pt/index.html"
+    },
+    {
+      "source": "/en/news/:slug*",
+      "destination": "/en/index.html"
+    },
+    {
+      "source": "/pt/archive",
+      "destination": "/pt/archive/index.html"
+    },
+    {
+      "source": "/en/archive",
+      "destination": "/en/archive/index.html"
+    },
+    {
+      "source": "/pt/privacy",
+      "destination": "/pt/privacy/index.html"
+    },
+    {
+      "source": "/en/privacy",
+      "destination": "/en/privacy/index.html"
+    },
+    {
+      "source": "/pt/:path*",
+      "destination": "/pt/index.html"
+    },
+    {
+      "source": "/en/:path*",
+      "destination": "/en/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(css|js)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=86400, stale-while-revalidate=604800"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)\\.(xml|json)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=600"
+        }
+      ]
+    }
+  ]
+}

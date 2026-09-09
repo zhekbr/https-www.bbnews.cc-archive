@@ -6,16 +6,166 @@ const ROWS_COUNT = 3;
 let activeCard = null;
 let slugMap = {};
 
-function toSlug(text) {
-  return text
+const STOP_WORDS = new Set([
+  'a', 'ao', 'aos', 'as', 'ate', 'com', 'da', 'das', 'de', 'do', 'dos', 'e', 'em',
+  'na', 'nas', 'no', 'nos', 'o', 'os', 'ou', 'para', 'pela', 'pelas', 'pelo', 'pelos',
+  'por', 'pra', 'pro', 'que', 'se', 'sem', 'sob', 'sobre', 'um', 'uma', 'umas', 'uns',
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'for', 'from', 'in', 'into',
+  'is', 'it', 'its', 'of', 'on', 'or', 'that', 'the', 'to', 'was', 'were', 'with'
+]);
+
+function toSlug(text, maxWords = 7) {
+  if (!text || typeof text !== 'string') return '';
+  const clean = text
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '-')
-    .replace(/-+/g, '-')
-    .slice(0, 80);
+    .replace(/,/g, '')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/[-_\s]+/g, ' ')
+    .trim();
+  if (!clean) return '';
+  const words = clean.split(' ').filter(Boolean);
+  const meaningfulWords = words.filter(word => !STOP_WORDS.has(word));
+  const selectedWords = (meaningfulWords.length > 0 ? meaningfulWords : words).slice(0, maxWords);
+  return selectedWords.join('-').replace(/^-+|-+$/g, '');
+}
+
+function toTagSlug(tag) {
+  if (!tag || typeof tag !== 'string') return '';
+  let str = tag.trim().replace(/^#+/, '');
+  if (!str) return '';
+  str = str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  str = str.replace(/([a-z0-9])([A-Z])/g, '$1-$2');
+  str = str.replace(/([A-Z]+)([A-Z][a-z])/g, '$1-$2');
+  return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+function parseTags(input) {
+  if (!input) return [];
+  let rawTokens = [];
+  if (Array.isArray(input)) {
+    rawTokens = input;
+  } else if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return [];
+    const segments = trimmed.includes(',') || trimmed.includes(';') || trimmed.includes('\n')
+      ? trimmed.split(/[,;\n\r]+/)
+      : [trimmed];
+    for (const seg of segments) {
+      const words = seg.trim().split(/\s+/).filter(Boolean);
+      for (const w of words) {
+        const parts = w.split(/#+/).filter(Boolean);
+        for (const p of parts) {
+          const clean = p.trim().replace(/^[^a-zA-Z0-9\u00C0-\u024F]+|[^a-zA-Z0-9\u00C0-\u024F]+$/g, '');
+          if (clean) rawTokens.push(clean);
+        }
+      }
+    }
+  }
+  const seenSlugs = new Set();
+  const result = [];
+  for (const item of rawTokens) {
+    let label = '';
+    let slug = '';
+    if (typeof item === 'object' && item !== null) {
+      label = String(item.label || item.name || item.tag || '').trim().replace(/^#+/, '');
+      slug = item.slug ? toTagSlug(item.slug) : toTagSlug(label);
+    } else if (typeof item === 'string') {
+      label = item.trim().replace(/^#+/, '');
+      slug = toTagSlug(label);
+    }
+    if (!slug || !label) continue;
+    if (!seenSlugs.has(slug)) {
+      seenSlugs.add(slug);
+      result.push({ label, slug });
+    }
+  }
+  return result;
+}
+
+function formatTagPillsHtml(tags, lang = 'en') {
+  if (!tags || tags.length === 0) return '';
+  const parsed = Array.isArray(tags) && tags[0] && typeof tags[0] === 'object'
+    ? tags
+    : parseTags(tags);
+  if (parsed.length === 0) return '';
+  const pills = parsed.map(t =>
+    `<a href="/${lang}/tag/${t.slug}" class="article-tag-pill" title="Archive for #${esc(t.label)}">#${esc(t.label)}</a>`
+  ).join('');
+  return `<div class="article-tags">${pills}</div>`;
+}
+
+const REGIONAL_TAXONOMY = {
+  brasil: {
+    id: 'brasil',
+    keywords: [
+      'brasil', 'brazil', 'stf', 'politica-br', 'pf', 'policia-federal', 'pgr',
+      'fgts', 'tributario', 'brasilia', 'lula', 'andrei-rodrigues', 'crise-judicial',
+      'governanca', 'democracia', '7de-setembro', 'privacidade-dados', 'caso-master',
+      'conflito-constitucional', 'economia-brasil', 'crise-stf'
+    ]
+  },
+  crypto: {
+    id: 'crypto',
+    keywords: [
+      'bitcoin', 'btc', 'cripto', 'crypto', 'cryptocurrency', 'blockchain',
+      'defi', 'ethereum', 'eth', 'liquid-network', 'zondacrypto', 'crime-cripto',
+      'cripto-crime', 'roubo-bitcoin', 'hack', 'malone-lam', 'regulacao-cripto',
+      'noticias-cripto', 'altcoin'
+    ]
+  },
+  middleEast: {
+    id: 'middleEast',
+    keywords: [
+      'oriente-medio', 'middle-east', 'israel', 'israel-libano', 'israel-palestina',
+      'cisjordania', 'west-bank', 'ira', 'iran', 'sancoes-ira', 'sancoes-uk',
+      'iaea', 'petroleo', 'petroleo-ira', 'oil', 'brent', 'mercado-petrolifero',
+      'mercado-de-energia', 'precos-do-petroleo', 'shanghai-crude', 'estreito-de-hormuz',
+      'estreito-hormuz', 'strait-of-hormuz', 'tensoes-oriente-medio', 'cessar-fogo-junho'
+    ]
+  },
+  global: {
+    id: 'global',
+    keywords: [
+      'trump', 'us', 'eua', 'us-politics', 'politica-eua', 'sancoes-eua',
+      'justica-eua', 'russia', 'ukraine', 'nato', 'china', 'demanda-china',
+      'quenia', 'africa-oriental', 'polonia', 'singapura', 'bombardier',
+      'goldman-sachs', 'guerra-comercial', 'comercio-eua-canada', 'geopolitica',
+      'geopolitics', 'economy', 'economia', 'markets', 'mercados', 'regulation',
+      'regulacao', 'news', 'sec', 'fed', 'federal-reserve'
+    ]
+  }
+};
+
+function getRegionForTag(tagSlug) {
+  if (!tagSlug) return REGIONAL_TAXONOMY.global;
+  const slug = String(tagSlug).toLowerCase();
+  for (const region of Object.values(REGIONAL_TAXONOMY)) {
+    if (region.keywords.some(k => slug.includes(k) || k.includes(slug))) {
+      return region;
+    }
+  }
+  return REGIONAL_TAXONOMY.global;
+}
+
+function getRegionForArticle(article) {
+  if (!article) return REGIONAL_TAXONOMY.global;
+  const tags = article.parsedTags || parseTags(article.tag || article.tags);
+  for (const t of tags) {
+    for (const region of Object.values(REGIONAL_TAXONOMY)) {
+      if (region.keywords.some(k => t.slug.includes(k) || k.includes(t.slug))) {
+        return region;
+      }
+    }
+  }
+  const text = `${article.title || ''} ${article.body || article.conteudo_blog || ''}`.toLowerCase();
+  for (const region of Object.values(REGIONAL_TAXONOMY)) {
+    if (region.keywords.some(k => text.includes(k))) {
+      return region;
+    }
+  }
+  return REGIONAL_TAXONOMY.global;
 }
 
 function extractTitle(content) {
@@ -247,6 +397,8 @@ function renderArticle(post) {
     ? renderArticleContent(post, locale)
     : contentToHTML(post.body || post.conteudo_blog || '');
 
+  const tagsHtml = formatTagPillsHtml(post.parsedTags || post.tag || post.tags, locale);
+
   container.innerHTML = `
     <div class="article-breadcrumb">
       <span class="breadcrumb-home" onclick="goHome()">BBN</span>
@@ -256,6 +408,7 @@ function renderArticle(post) {
     <h1 class="article-title">${esc(post.title)}</h1>
     <hr class="article-divider">
     <div class="article-body">${bodyHtml}</div>
+    ${tagsHtml}
     <div style="margin-top:2.5rem;display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
       ${sourceBtn}
       <button class="article-back-btn" onclick="goHome()">${locale === 'pt' ? '← Voltar às notícias' : '← Back to news'}</button>
@@ -277,10 +430,12 @@ function showPage(pageId) {
   const pageHome = document.getElementById('page-home');
   const pageArticle = document.getElementById('page-article');
   const pageArchive = document.getElementById('page-archive');
+  const pageTagArchive = document.getElementById('page-tag-archive');
 
   if (pageHome) pageHome.classList.remove('active');
   if (pageArticle) pageArticle.classList.remove('active');
   if (pageArchive) pageArchive.classList.remove('active');
+  if (pageTagArchive) pageTagArchive.classList.remove('active');
 
   const target = document.getElementById(pageId);
   if (target) {
@@ -322,7 +477,11 @@ function goHome() {
   const locale = getCurrentLocale();
   const targetUrl = `/${locale}/`;
   if (!document.getElementById('page-home')) {
-    window.location.href = targetUrl;
+    const currentNorm = window.location.pathname.replace(/\/+$/, '');
+    const targetNorm = targetUrl.replace(/\/+$/, '');
+    if (currentNorm !== targetNorm) {
+      window.location.href = targetUrl;
+    }
     return;
   }
   try { history.pushState(null, '', targetUrl); } catch (e) { window.location.href = targetUrl; return; }
@@ -335,7 +494,11 @@ function goArchive() {
   const locale = getCurrentLocale();
   const targetUrl = `/${locale}/archive`;
   if (!document.getElementById('page-archive')) {
-    window.location.href = targetUrl;
+    const currentNorm = window.location.pathname.replace(/\/+$/, '');
+    const targetNorm = targetUrl.replace(/\/+$/, '');
+    if (currentNorm !== targetNorm) {
+      window.location.href = targetUrl;
+    }
     return;
   }
   try { history.pushState(null, '', targetUrl); } catch (e) { window.location.href = targetUrl; return; }
@@ -344,17 +507,62 @@ function goArchive() {
   closePanel();
 }
 
+function findPostBySlug(slug) {
+  if (!slug) return null;
+  if (slugMap[slug]) return slugMap[slug];
+
+  const posts = Object.values(slugMap);
+
+  // 1. Direct match by numeric id
+  const byId = posts.find(p => String(p.id) === String(slug));
+  if (byId) return byId;
+
+  // 2. Direct match by stored row.slug / _slug
+  const byStored = posts.find(p => p.slug === slug || (p._slug && p._slug === slug) || (p.rawSlug && p.rawSlug === slug));
+  if (byStored) return byStored;
+
+  // 3. Normalized slug match (strips stop words from incoming slug and compares)
+  const normalizedIncoming = toSlug(slug.replace(/-/g, ' '));
+  if (normalizedIncoming) {
+    if (slugMap[normalizedIncoming]) return slugMap[normalizedIncoming];
+    const byNorm = posts.find(p => {
+      const pNorm = toSlug(p.title || p.headline || '');
+      return pNorm === normalizedIncoming || p.slug === normalizedIncoming;
+    });
+    if (byNorm) return byNorm;
+  }
+
+  // 4. Prefix match (handles truncated slugs e.g. at 80 characters or word breaks)
+  const byPrefix = posts.find(p => {
+    return (p.slug && (p.slug.startsWith(slug) || slug.startsWith(p.slug))) ||
+           (normalizedIncoming && p.slug && (p.slug.startsWith(normalizedIncoming) || normalizedIncoming.startsWith(p.slug)));
+  });
+  if (byPrefix) return byPrefix;
+
+  return null;
+}
+
 function goArticle(slug) {
   const locale = getCurrentLocale();
-  const post = slugMap[slug];
-  const url = `/${locale}/news/${slug}`;
-  try { history.pushState(null, '', url); } catch (e) { window.location.href = url; }
+  const post = findPostBySlug(slug);
 
   if (!post) {
+    const url = `/${locale}/news/${slug}`;
+    try { history.pushState(null, '', url); } catch (e) { window.location.href = url; }
     showPage('page-article');
     renderArticleNotFound(slug);
     return;
   }
+
+  // Canonicalize URL smoothly without reloading
+  const canonicalSlug = post.slug || slug;
+  const canonicalUrl = `/${locale}/news/${canonicalSlug}`;
+  try {
+    if (window.location.pathname !== canonicalUrl) {
+      history.replaceState(null, '', canonicalUrl);
+    }
+  } catch (e) { /* ignore history error */ }
+
   document.title = `${post.title} — BBN`;
   showPage('page-article');
   renderArticle(post);
@@ -370,6 +578,16 @@ function routeFromURL() {
     path === '/privacy' || path === '/privacy/' || path === '/privacy/index.html' || path === '/privacy.html' ||
     path === '/en/privacy' || path === '/en/privacy/' || path === '/en/privacy/index.html' || path === '/en/privacy.html' ||
     path === '/pt/privacy' || path === '/pt/privacy/' || path === '/pt/privacy/index.html' || path === '/pt/privacy.html'
+  ) {
+    return;
+  }
+
+  // Tag and Region archive pages are pre-rendered statically with their own grid and cloud
+  if (
+    path.includes('/tag/') ||
+    path.includes('/regiao/') ||
+    path.includes('/region/') ||
+    document.getElementById('page-tag-archive')
   ) {
     return;
   }
@@ -456,12 +674,41 @@ function assembleFullArticleMarkdown(row, lang) {
   return sections.join('\n\n');
 }
 
+function isValidClientArticle(item) {
+  if (!item) return false;
+  const rawTitle = (item.headline || item.title || '').replace(/\*\*/g, '').trim();
+  const lowerTitle = rawTitle.toLowerCase();
+  if (!rawTitle || lowerTitle === 'untitled' || lowerTitle === 'sem título' || lowerTitle === 'sem titulo') {
+    return false;
+  }
+  const content = (
+    item.body ||
+    item.content ||
+    item.conteudo_blog ||
+    item.article_lead ||
+    ''
+  ).trim();
+  if (!content || content.length < 30) {
+    return false;
+  }
+  const stripped = content
+    .replace(/\*\*Source:\*\*.*$/i, '')
+    .replace(/\*\*Fonte:\*\*.*$/i, '')
+    .replace(/Source:.*$/i, '')
+    .replace(/Fonte:.*$/i, '')
+    .trim();
+  if (!stripped && (content.includes('http://') || content.includes('https://'))) {
+    return false;
+  }
+  return true;
+}
+
 function processArticleRows(rows) {
-  rows.forEach((row) => {
+  (rows || []).filter(isValidClientArticle).forEach((row) => {
     const locale = getCurrentLocale();
-    const title = row.headline && row.headline !== 'Untitled' ? row.headline : (row.title || 'Untitled');
-    let slug = toSlug(title);
-    if (slugMap[slug]) slug = `${slug}-${row.id}`;
+    const title = (row.headline || row.title || '').replace(/\*\*/g, '').trim();
+    let slug = row.slug || toSlug(title);
+    if (slugMap[slug] && String(slugMap[slug].id) !== String(row.id)) slug = `${slug}-${row.id}`;
     
     const assembledBody = assembleFullArticleMarkdown(row, locale);
     const body = assembledBody || row.conteudo_blog || row.content || '';
@@ -474,6 +721,7 @@ function processArticleRows(rows) {
       body,
       conteudo_blog: body,
       slug,
+      rawSlug: row.slug || '',
       link: row.source_url || row.link || '',
       source_name: row.source_name || '',
       source_url: row.source_url || row.link || '',
@@ -485,6 +733,9 @@ function processArticleRows(rows) {
       market_reaction: row.market_reaction || ''
     };
     slugMap[slug] = post;
+    if (row.slug && row.slug !== slug) {
+      slugMap[row.slug] = post;
+    }
     row._slug = slug;
     row.title = title;
   });
@@ -514,7 +765,7 @@ async function fetchFromSupabase() {
   }
   if (!rows || rows.length === 0) throw new Error('No articles in Supabase');
 
-  // Map Supabase columns to BBN article format
+  // Map Supabase columns to BBN article format and filter out empty/untitled ones
   return rows.map(row => {
     const headlineClean = (row.headline || (locale === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
     const content = row.content || row.article_lead || '';
@@ -538,13 +789,14 @@ async function fetchFromSupabase() {
       market_reaction: row.market_reaction || '',
       tags: row.tag ? (Array.isArray(row.tag) ? row.tag : String(row.tag).split(/[,\s#]+/).filter(Boolean)) : clientExtractTags(row.headline || '', content)
     };
-  });
+  }).filter(isValidClientArticle);
 }
 
 async function loadArticles() {
   try {
     // Primary source: Supabase (always up to date)
-    const articles = await fetchFromSupabase();
+    const rawArticles = await fetchFromSupabase();
+    const articles = (rawArticles || []).filter(isValidClientArticle);
     processArticleRows(articles);
     console.log(`[BBN] Loaded ${articles.length} articles from Supabase`);
     return articles;
@@ -553,8 +805,9 @@ async function loadArticles() {
     try {
       const res = await fetch('/articles.json');
       if (!res.ok) throw new Error('Failed to load articles.json');
-      const articles = await res.json();
-      if (!Array.isArray(articles) || articles.length === 0) throw new Error('Empty articles.json');
+      const rawArticles = await res.json();
+      if (!Array.isArray(rawArticles) || rawArticles.length === 0) throw new Error('Empty articles.json');
+      const articles = rawArticles.filter(isValidClientArticle);
       processArticleRows(articles);
       console.log(`[BBN] Loaded ${articles.length} articles from articles.json (fallback)`);
       return articles;
@@ -643,6 +896,8 @@ function makeCard(item, rowIdx, votesMap) {
   const card = document.createElement('div');
   card.className = 'news-card';
   card.dataset.newsId = item.id;
+  const regId = (item.region ? (typeof item.region === 'object' ? item.region.id : item.region) : getRegionForArticle(item).id);
+  card.dataset.region = regId;
   if (item.tags && item.tags.length > 0) {
     card.dataset.tags = item.tags.join(',');
   } else {
@@ -686,6 +941,7 @@ function closePanel() {
   activeCard = null;
 }
 function populateRows(noticias) {
+  noticias = (noticias || []).filter(isValidClientArticle);
   const votesMap = JSON.parse(localStorage.getItem('bbn_votes') || '{}');
   noticias.forEach(item => {
     const originalScore = parseFloat(item.score) || 6;
@@ -923,8 +1179,8 @@ function populateArchive(noticias) {
   const frag = document.createDocumentFragment();
 
   noticias.forEach(item => {
-    // Defensive: skip articles with missing critical fields
-    if (!item || !item.title || !item.time) return;
+    // Defensive: skip articles with missing critical fields or empty text
+    if (!item || !isValidClientArticle(item)) return;
 
     const card = document.createElement('a');
     card.className = 'bbn-archive-row';
@@ -933,6 +1189,8 @@ function populateArchive(noticias) {
     // Set attributes for filtering
     card.dataset.time = item.time;
     card.dataset.title = (item.title || '').toLowerCase();
+    const regId = (item.region ? (typeof item.region === 'object' ? item.region.id : item.region) : getRegionForArticle(item).id);
+    card.dataset.region = regId;
     if (item.tags && item.tags.length > 0) {
       card.dataset.tags = item.tags.join(',');
     } else {
@@ -993,6 +1251,8 @@ function updateArchiveGrid() {
   const searchInput = document.getElementById('archive-search');
   const periodSelect = document.getElementById('archive-period');
   const activeBtn = document.querySelector('#filter-container .filter-btn.active');
+  const activeRegionBtn = document.querySelector('.region-tab-btn.active');
+  const regionId = activeRegionBtn ? (activeRegionBtn.getAttribute('data-region-id') || 'all') : 'all';
   
   const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
   const period = periodSelect ? periodSelect.value : 'all';
@@ -1002,6 +1262,9 @@ function updateArchiveGrid() {
   const now = Date.now();
   
   const filteredRows = rows.filter(row => {
+    // 0. Region filter
+    const matchesRegion = (regionId === 'all' || row.dataset.region === regionId);
+
     // 1. Tag filter
     const rowTags = row.dataset.tags ? row.dataset.tags.split(',') : [];
     const matchesTag = (tagValue === 'all' || rowTags.includes(tagValue));
@@ -1022,7 +1285,7 @@ function updateArchiveGrid() {
       matchesPeriod = (ageHours <= 24 * 30);
     }
     
-    return matchesTag && matchesSearch && matchesPeriod;
+    return matchesRegion && matchesTag && matchesSearch && matchesPeriod;
   });
   
   // Update total count
@@ -1193,11 +1456,25 @@ async function init() {
   fetchBtcPrice();
   setInterval(fetchBtcPrice, 15000);
 
-  const isPreRendered = document.getElementById('article-container')
+  const isPreRendered = (document.getElementById('article-container')
     && document.getElementById('article-container').children.length > 0
-    && window.location.pathname.includes('/news/');
+    && window.location.pathname.includes('/news/'))
+    || Boolean(document.getElementById('page-tag-archive'));
 
-  if (!isPreRendered) {
+  const isArticleUrl = window.location.pathname.includes('/news/');
+  const isTagArchive = Boolean(document.getElementById('page-tag-archive'));
+
+  if (isArticleUrl && !isPreRendered) {
+    showPage('page-article');
+    const container = document.getElementById('article-container');
+    if (container && container.children.length === 0) {
+      container.innerHTML = `
+        <div class="state-message" style="padding: 4rem 1rem; text-align: center;">
+          <div style="font-size: 2rem; margin-bottom: 0.75rem;">⏳</div>
+          <div style="font-family: 'IBM Plex Mono', monospace; font-size: 0.85rem; color: #888;">Loading article...</div>
+        </div>`;
+    }
+  } else if (!isPreRendered) {
     showSkeletons();
   }
 
@@ -1214,17 +1491,24 @@ async function init() {
 
       // Always populate the archive grid with fresh Supabase data,
       // whether the user landed directly on /archive or navigated via JS.
+      // NOTE: Do not overwrite pre-rendered tag archive grid!
       const archiveGrid = document.getElementById('archive-grid');
       if (archiveGrid) {
-        populateArchive(noticias);
-        buildFilters(noticias);
+        if (!isTagArchive) {
+          populateArchive(noticias);
+          buildFilters(noticias);
+        } else {
+          setupArchiveControls();
+        }
       }
     } else if (!isPreRendered) {
       showError(new Error('No articles available'));
     }
 
     if (!isPreRendered || !window.location.pathname.includes('/news/')) {
-      routeFromURL();
+      if (!isTagArchive) {
+        routeFromURL();
+      }
     } else {
       showPage('page-article');
     }
@@ -1241,6 +1525,55 @@ document.addEventListener('DOMContentLoaded', () => {
   init();
   window.addEventListener('popstate', routeFromURL);
   
+  // Wire up 2-Tier Regional Navigation Tab switching
+  document.addEventListener('click', (e) => {
+    const tabBtn = e.target.closest('.region-tab-btn');
+    if (!tabBtn) return;
+
+    e.preventDefault();
+    const wrapper = tabBtn.closest('.regional-nav-wrapper');
+    if (!wrapper) return;
+
+    const regionId = tabBtn.getAttribute('data-region-id') || 'all';
+
+    // Update active tab UI
+    wrapper.querySelectorAll('.region-tab-btn').forEach(b => b.classList.remove('active'));
+    tabBtn.classList.add('active');
+
+    // If regionId is 'all', collapse sub-topics completely; otherwise expand
+    if (regionId === 'all') {
+      wrapper.classList.remove('has-region-active');
+      wrapper.querySelectorAll('.region-subtags-panel').forEach(p => p.classList.remove('active'));
+    } else {
+      wrapper.classList.add('has-region-active');
+      wrapper.querySelectorAll('.region-subtags-panel').forEach(p => {
+        if (p.getAttribute('data-panel-region') === regionId) {
+          p.classList.add('active');
+        } else {
+          p.classList.remove('active');
+        }
+      });
+    }
+
+    // If on archive grid, update archive grid immediately
+    if (document.getElementById('archive-grid')) {
+      archivePage = 1;
+      updateArchiveGrid();
+      return;
+    }
+
+    // If on homepage feed, filter news cards
+    const cards = document.querySelectorAll('.news-card');
+    cards.forEach(c => {
+      if (regionId === 'all') {
+        c.style.display = '';
+      } else {
+        const cardReg = c.dataset.region || 'global';
+        c.style.display = (cardReg === regionId) ? '' : 'none';
+      }
+    });
+  });
+
   // Wire up delegated filter click listener
   document.addEventListener('click', (e) => {
     const btn = e.target.closest('#filter-container .filter-btn');
