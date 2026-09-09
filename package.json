@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "start": "node index.js",
     "build": "node build.mjs",
     "dev": "node build.mjs && npx serve dist",
     "preview": "npx serve dist"
