@@ -129,12 +129,16 @@
       <!-- 2-Tier Regional Navigation Bar -->
 {{REGIONAL_NAV}}
 
-      <div class="archive-controls" style="display:flex;gap:1rem;margin:1.5rem 0;flex-wrap:wrap;">
-        <div class="search-box-wrap" style="flex:1;min-width:250px;position:relative;">
-          <input type="text" id="archive-search" placeholder="{{SEARCH_PLACEHOLDER}}" class="archive-search-input" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;transition:border-color 0.2s;">
+      <div class="archive-controls">
+        <div class="search-box-wrap">
+          <svg class="search-box-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input type="text" id="archive-search" placeholder="{{SEARCH_PLACEHOLDER}}" class="archive-search-input" autocomplete="off" spellcheck="false">
         </div>
-        <div class="filter-dropdown-wrap" style="width:180px;">
-          <select id="archive-period" class="archive-select" style="width:100%;padding:0.6rem 1rem;background:var(--white);border:1.5px solid var(--border-color);font-family:'Sora',sans-serif;font-size:0.85rem;color:var(--text);border-radius:0px;outline:none;cursor:pointer;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23888%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5%201.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');background-repeat:no-repeat;background-position:right%201rem%20center;background-size:0.65rem%20auto;padding-right:2.5rem;">
+        <div class="filter-dropdown-wrap">
+          <select id="archive-period" class="archive-select">
             <option value="all">{{PERIOD_ALL_TIME}}</option>
             <option value="today">{{PERIOD_TODAY}}</option>
             <option value="week">{{PERIOD_WEEK}}</option>
