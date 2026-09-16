@@ -186,13 +186,34 @@ export function formatSectionText(text) {
 }
 
 /**
+ * Detects if a URL points to an image file or image CDN instead of an article.
+ */
+export function isImageUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  const clean = url.trim().toLowerCase().split(/[?#]/)[0];
+  if (/\.(jpe?g|png|webp|gif|svg|avif|bmp|ico|tiff)$/i.test(clean)) return true;
+  if (url.includes('/fotografia/') || url.includes('/photos/') || url.includes('/uploads/images/')) return true;
+  return false;
+}
+
+/**
+ * Validates and sanitizes external source URLs.
+ * Rejects non-HTTP URLs, image URLs, and URLs explicitly flagged with USE_LINK = "no".
+ */
+export function sanitizeSourceUrl(url, useLinkFlag) {
+  if (useLinkFlag === 'no' || useLinkFlag === false || useLinkFlag === 'false') return '';
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!/^https?:\/\//i.test(trimmed)) return '';
+  if (isImageUrl(trimmed)) return '';
+  return trimmed;
+}
+
+/**
  * Validates and sanitizes external URLs.
  */
 export function sanitizeUrl(url) {
-  if (!url || typeof url !== 'string') return '';
-  const trimmed = url.trim();
-  if (/^https?:\/\//i.test(trimmed)) return trimmed;
-  return '';
+  return sanitizeSourceUrl(url);
 }
 
 /**
@@ -286,8 +307,16 @@ export function renderArticleContent(row, lang = 'en') {
     `);
   }
 
-  // 7. Source Attribution
-  const safeSourceUrl = sanitizeUrl(row.source_url || row.link);
+  // Fallback: If no structured sections were present, render full markdown content/body
+  if (sections.length === 0) {
+    const rawContent = (row.body || row.content || row.conteudo_blog || '').trim();
+    if (rawContent) {
+      sections.push(contentToHTML(rawContent));
+    }
+  }
+
+  // 7. Source Attribution (only if safe valid URL and not an image link)
+  const safeSourceUrl = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
   if (safeSourceUrl) {
     const displayName = (row.source_name || safeSourceUrl).trim();
     sections.push(`
@@ -329,10 +358,16 @@ export function assembleFullArticleMarkdown(row, lang = 'en') {
   if (isValidSection(row.market_reaction)) {
     sections.push(`### ${isPt ? 'REAÇÃO DO MERCADO' : 'MARKET REACTION'}\n\n${row.market_reaction.trim()}`);
   }
-  const sourceUrl = (row.source_url || row.link || '').trim();
-  const sourceName = (row.source_name || sourceUrl).trim();
-  if (sourceUrl) {
-    sections.push(`**${isPt ? 'Fonte' : 'Source'}:** [${sourceName}](${sourceUrl})`);
+
+  // CRITICAL: If no substantive content sections exist, do NOT return only a source link
+  if (sections.length === 0) {
+    return '';
+  }
+
+  const safeSource = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
+  const sourceName = (row.source_name || safeSource).trim();
+  if (safeSource) {
+    sections.push(`**${isPt ? 'Fonte' : 'Source'}:** [${sourceName}](${safeSource})`);
   }
 
   return sections.join('\n\n');
@@ -723,14 +758,7 @@ ${panelsHtml}  </div>
 export function isValidArticleRecord(row) {
   if (!row) return false;
 
-  // 1. Validate headline / title
-  const rawTitle = (row.headline || row.title || row.title_en || row.title_pt || '').replace(/\*\*/g, '').trim();
-  const lowerTitle = rawTitle.toLowerCase();
-  if (!rawTitle || lowerTitle === 'untitled' || lowerTitle === 'sem título' || lowerTitle === 'sem titulo') {
-    return false;
-  }
-
-  // 2. Validate article body / content
+  // 1. Validate article body / content first
   const content = (
     row.body ||
     row.content ||
@@ -748,15 +776,42 @@ export function isValidArticleRecord(row) {
 
   // Reject if the content is just a raw source/image link without actual news text
   const strippedContent = content
-    .replace(/\*\*Source:\*\*.*$/i, '')
-    .replace(/\*\*Fonte:\*\*.*$/i, '')
-    .replace(/Source:.*$/i, '')
-    .replace(/Fonte:.*$/i, '')
+    .replace(/\*\*Source:\*\*[\s\S]*$/i, '')
+    .replace(/\*\*Fonte:\*\*[\s\S]*$/i, '')
+    .replace(/Source:[\s\S]*$/i, '')
+    .replace(/Fonte:[\s\S]*$/i, '')
+    .replace(/https?:\/\/[^\s]+/gi, '')
+    .replace(/[#*\[\]()_`>-]/g, '')
     .trim();
-  if (!strippedContent && (content.includes('http://') || content.includes('https://'))) {
+
+  if (!strippedContent || strippedContent.length < 25) {
+    return false;
+  }
+
+  // 2. Validate headline / title
+  let rawTitle = (
+    row.headline ||
+    row.title ||
+    row.title_en ||
+    row.title_pt ||
+    row.headline_en ||
+    row.headline_pt ||
+    ''
+  ).replace(/\*\*/g, '').trim();
+
+  if (!rawTitle && content) {
+    rawTitle = extractTitle(content);
+  }
+  if (!rawTitle && (row.hook || row.summary)) {
+    rawTitle = (row.hook || row.summary).trim();
+  }
+
+  const lowerTitle = rawTitle.toLowerCase();
+  if (!rawTitle || lowerTitle === 'untitled' || lowerTitle === 'sem título' || lowerTitle === 'sem titulo') {
     return false;
   }
 
   return true;
 }
+
 

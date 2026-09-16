@@ -7,7 +7,28 @@ import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } fr
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
-import { toSlug, extractTitle, extractBody, contentToHTML, esc, renderArticleContent, assembleFullArticleMarkdown, toTagSlug, parseTags, formatTagPillsHtml, formatTagCloudHtml, REGIONAL_TAXONOMY, getRegionForTag, getRegionForArticle, groupTagsByRegion, formatRegionalNavHtml, isValidArticleRecord } from './shared.mjs';
+import {
+  toSlug,
+  extractTitle,
+  extractBody,
+  contentToHTML,
+  esc,
+  renderArticleContent,
+  assembleFullArticleMarkdown,
+  toTagSlug,
+  parseTags,
+  formatTagPillsHtml,
+  formatTagCloudHtml,
+  REGIONAL_TAXONOMY,
+  getRegionForTag,
+  getRegionForArticle,
+  groupTagsByRegion,
+  formatRegionalNavHtml,
+  isValidArticleRecord,
+  isValidSection,
+  sanitizeSourceUrl,
+  isImageUrl
+} from './shared.mjs';
 
 // ── Configuration ──────────────────────────────────────────
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -291,11 +312,29 @@ async function fetchSupabaseTable(tableName) {
 
 // ── Map Supabase Row to Internal BBN Article Model ──────────
 function mapSupabaseRow(row, lang = 'en') {
-  const rawTitle = (row.headline || row.title || '').trim() || ((row.hook || row.summary || '').split(/[.!?]/)[0].trim().slice(0, 110));
+  let rawTitle = (row.headline || row.title || '').trim();
+  const explicitContent = (row.content || row.conteudo_blog || '').trim();
+  if (!rawTitle && explicitContent) {
+    rawTitle = extractTitle(explicitContent);
+  }
+  if (!rawTitle || rawTitle === 'Untitled') {
+    const candidate = (row.hook || row.summary || '').trim();
+    if (candidate) {
+      const firstSentence = candidate.split(/[.!?]/)[0].trim();
+      if (firstSentence.length <= 110) {
+        rawTitle = firstSentence;
+      } else {
+        const words = firstSentence.slice(0, 95).split(' ');
+        if (words.length > 1) words.pop();
+        rawTitle = words.join(' ') + '…';
+      }
+    }
+  }
+
   const title = (rawTitle || (lang === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
   const assembledMarkdown = assembleFullArticleMarkdown(row, lang);
-  const content = row.content || row.conteudo_blog || assembledMarkdown;
-  const body = assembledMarkdown || extractBody(content, title) || content;
+  const content = explicitContent || assembledMarkdown;
+  const body = explicitContent ? (extractBody(explicitContent, title) || explicitContent) : assembledMarkdown;
   const summary = row.summary || (row.article_lead ? row.article_lead.slice(0, 160).replace(/\n/g, ' ').trim() : (body ? body.slice(0, 160).replace(/\n/g, ' ').trim() : ''));
   const hook = row.hook || '';
   const score = 7;
@@ -308,6 +347,7 @@ function mapSupabaseRow(row, lang = 'en') {
     ? parseTags(rawTagSource)
     : extractTagsFromContent(title, content).map(t => ({ label: t.charAt(0).toUpperCase() + t.slice(1), slug: toTagSlug(t) }));
   const tags = parsedTags.map(t => t.slug);
+  const safeSource = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
 
   return {
     id: String(row.id),
@@ -323,9 +363,10 @@ function mapSupabaseRow(row, lang = 'en') {
     time,
     parsedTags,
     tags,
-    link: row.source_url || row.link || '',
+    link: safeSource,
     source_name: row.source_name || '',
-    source_url: row.source_url || row.link || '',
+    source_url: safeSource,
+    USE_LINK: row.USE_LINK,
     article_lead: row.article_lead || '',
     data_figures: row.data_figures || '',
     scenario: row.scenario || '',
@@ -636,13 +677,13 @@ function generateArticlePage(post, template, lang) {
   const ogImage = CONFIG.baseUrl + CONFIG.defaultOgImage;
   const breadcrumb = esc(post.title.slice(0, 45)) + (post.title.length > 45 ? '…' : '');
   const hasStructuredSections = Boolean(
-    post.article_lead || post.data_figures || post.scenario ||
-    post.quote_text || post.insight || post.market_reaction
+    isValidSection(post.article_lead) || isValidSection(post.data_figures) || isValidSection(post.scenario) ||
+    isValidSection(post.quote_text) || isValidSection(post.insight) || isValidSection(post.market_reaction)
   );
   const articleBodyHtml = hasStructuredSections
     ? renderArticleContent(post, lang)
     : contentToHTML(post.body || post.conteudo_blog || '');
-  const safeLink = sanitizeUrl(post.link);
+  const safeLink = sanitizeSourceUrl(post.link, post.USE_LINK);
   const sourceBtn = safeLink
     ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">${dict.viewOriginalSource}</a>`
     : '';
