@@ -222,9 +222,12 @@ header {
 .ticker-belt {
   display: flex;
   width: max-content;
-  animation: tickMove 60s linear infinite;
+  animation: tickMove 160s linear infinite;
   backface-visibility: hidden;
   will-change: transform;
+}
+.ticker-wrap:hover .ticker-belt {
+  animation-play-state: paused;
 }
 .ticker-item {
   display: inline-flex;
