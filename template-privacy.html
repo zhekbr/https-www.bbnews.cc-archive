@@ -38,7 +38,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#F7931A">
-  <link rel="stylesheet" href="/style.css?v=1.9">
+  <link rel="stylesheet" href="/style.css?v=2.5">
   <!-- Google Analytics 4 (deferred) -->
   <script>
     window.addEventListener('load', function() {
@@ -84,26 +84,29 @@
   </nav>
 
   <main id="main-content">
-    <div id="page-privacy" class="active">
-      <div class="privacy-wrap">
-        <div class="article-breadcrumb">
-          <a class="breadcrumb-home" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">BBN</a>
-          <span>›</span>
-          <span>{{PRIVACY_TITLE}}</span>
-        </div>
+    <div class="privacy-wrap">
+      <div class="article-breadcrumb">
+        <a class="breadcrumb-home" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">BBN</a>
+        <span>›</span>
+        <span>{{PRIVACY_TITLE}}</span>
+      </div>
 
-        <h1 class="privacy-title">{{PRIVACY_TITLE}}</h1>
-        <hr class="article-divider">
-        <p class="privacy-updated">{{PRIVACY_LAST_UPDATED}}</p>
+      <div class="section-label">── {{SECTION_LABEL}}</div>
+
+      <article class="privacy-card">
+        <h1 class="privacy-title">{{PRIVACY_HEADING}}</h1>
+        <div class="privacy-meta">{{LAST_UPDATED}}</div>
+        <hr class="article-divider" style="margin-bottom: 2rem;">
 
         <div class="privacy-body">
-{{PRIVACY_CONTENT}}
+          {{PRIVACY_BODY}}
         </div>
 
-        <div style="margin-top:3rem;display:flex;justify-content:center;">
+        <div style="margin-top: 3rem; display: flex; gap: 1rem; flex-wrap: wrap;">
           <a class="article-back-btn" href="{{NAV_HOME_URL}}" onclick="event.preventDefault(); goHome()">← {{BACK_TO_HOME_TEXT}}</a>
+          <a class="article-back-btn" href="{{NAV_ARCHIVE_URL}}" onclick="event.preventDefault(); goArchive()">{{NAV_ARCHIVE_TEXT}} →</a>
         </div>
-      </div>
+      </article>
     </div>
   </main>
 
@@ -111,7 +114,8 @@
     <div class="footer-logo">BBN</div>
     <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; {{FOOTER_UPDATED}} &nbsp;·&nbsp; © 2025–2026 &nbsp;·&nbsp; <a href="{{FOOTER_PRIVACY_URL}}" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">{{FOOTER_PRIVACY_TEXT}}</a></div>
   </footer>
-  <script src="/app.js?v=1.19" defer></script>
+  <script>window.__BBN_CONFIG__ = {{BBN_CONFIG}};</script>
+  <script src="/app.js?v=2.5" defer></script>
   <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "95d43404634540c89039a8ce4c815372"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 

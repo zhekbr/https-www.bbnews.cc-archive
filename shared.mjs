@@ -54,16 +54,25 @@ export function extractTitle(content) {
   for (const line of lines) {
     let clean = line.trim();
     if (!clean) continue;
+    const isHeading = clean.startsWith('#') || /^\*\*[^*]+\*\*$/.test(clean);
     clean = clean.replace(/^#+\s*/, '');
     clean = clean.replace(/^\*\*(.+?)\*\*$/, '$1');
     clean = clean.replace(/\*\*/g, '');
-    if (clean.length > 3) return clean;
+    if (isHeading && clean.length > 3) return clean;
+    if (clean.length > 3 && clean.length <= 130) return clean;
+    if (clean.length > 130) {
+      const firstSentence = clean.split(/[.!?]/)[0].trim();
+      if (firstSentence.length <= 110) return firstSentence;
+      const words = firstSentence.slice(0, 95).split(' ');
+      if (words.length > 1) words.pop();
+      return words.join(' ');
+    }
   }
   return content.trim().slice(0, 60);
 }
 
 /**
- * Extract the body content, skipping the title line.
+ * Extract the body content, skipping the title line only if it is a standalone heading.
  */
 export function extractBody(content, title) {
   if (!content) return '';
@@ -71,10 +80,16 @@ export function extractBody(content, title) {
   const lines = text.split('\n');
   let startIdx = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim()) { startIdx = i + 1; break; }
+    const l = lines[i].trim();
+    if (l) {
+      if (l.startsWith('#') || /^\*\*[^*]+\*\*$/.test(l)) {
+        startIdx = i + 1;
+      }
+      break;
+    }
   }
   let body = lines.slice(startIdx).join('\n').trim();
-  return body;
+  return body || text;
 }
 
 /**

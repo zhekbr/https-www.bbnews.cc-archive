@@ -41,6 +41,47 @@ function toTagSlug(tag) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
+function extractTitle(content) {
+  if (!content) return 'Untitled';
+  const lines = content.trim().split('\n');
+  for (const line of lines) {
+    let clean = line.trim();
+    if (!clean) continue;
+    const isHeading = clean.startsWith('#') || /^\*\*[^*]+\*\*$/.test(clean);
+    clean = clean.replace(/^#+\s*/, '');
+    clean = clean.replace(/^\*\*(.+?)\*\*$/, '$1');
+    clean = clean.replace(/\*\*/g, '');
+    if (isHeading && clean.length > 3) return clean;
+    if (clean.length > 3 && clean.length <= 130) return clean;
+    if (clean.length > 130) {
+      const firstSentence = clean.split(/[.!?]/)[0].trim();
+      if (firstSentence.length <= 110) return firstSentence;
+      const words = firstSentence.slice(0, 95).split(' ');
+      if (words.length > 1) words.pop();
+      return words.join(' ');
+    }
+  }
+  return content.trim().slice(0, 60);
+}
+
+function extractBody(content, title) {
+  if (!content) return '';
+  const text = content.trim();
+  const lines = text.split('\n');
+  let startIdx = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i].trim();
+    if (l) {
+      if (l.startsWith('#') || /^\*\*[^*]+\*\*$/.test(l)) {
+        startIdx = i + 1;
+      }
+      break;
+    }
+  }
+  let body = lines.slice(startIdx).join('\n').trim();
+  return body || text;
+}
+
 function parseTags(input) {
   if (!input) return [];
   let rawTokens = [];

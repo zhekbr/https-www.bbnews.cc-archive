@@ -38,7 +38,7 @@
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#F7931A">
-  <link rel="stylesheet" href="/style.css?v=1.9">
+  <link rel="stylesheet" href="/style.css?v=2.5">
   <!-- JSON-LD: WebSite -->
   <script type="application/ld+json">
   {
@@ -118,16 +118,23 @@
   </div>
   <div id="page-home" class="active">
     <div class="section-label">── {{SECTION_LATEST_NEWS}}</div>
+    {{REGIONAL_NAV}}
     <div class="scroll-row" id="row-0">
-      <div class="scroll-track rev" id="tr0"></div>
+      <div class="scroll-track rev" id="tr0">
+        {{CARDS_ROW_0}}
+      </div>
     </div>
     <div class="expanded-panel" id="panel-0"></div>
     <div class="scroll-row" id="row-1">
-      <div class="scroll-track slow" id="tr1"></div>
+      <div class="scroll-track slow" id="tr1">
+        {{CARDS_ROW_1}}
+      </div>
     </div>
     <div class="expanded-panel" id="panel-1"></div>
     <div class="scroll-row" id="row-2">
-      <div class="scroll-track rev" id="tr2"></div>
+      <div class="scroll-track rev" id="tr2">
+        {{CARDS_ROW_2}}
+      </div>
     </div>
     <div class="expanded-panel" id="panel-2"></div>
     <div class="mais-noticias-container">
@@ -149,6 +156,32 @@
   <div id="page-article">
     <div class="article-wrap" id="article-container"></div>
   </div>
+
+  <div id="page-archive">
+    <div class="archive-container">
+      <div class="archive-header">
+        <h1 class="archive-title">{{ARCHIVE_HEADING}}</h1>
+        <div class="archive-count"><span id="archive-total-count">{{ARCHIVE_COUNT}}</span> {{ARTICLES_PUBLISHED}}</div>
+      </div>
+      <div class="archive-controls">
+        <div class="search-wrap">
+          <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="archive-search" class="search-input" placeholder="{{SEARCH_PLACEHOLDER}}" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+          <button id="search-clear" class="search-clear" title="Clear search">✕</button>
+        </div>
+        <div class="archive-filters">
+          <span class="filter-label">{{FILTER_LABEL}}</span>
+          <button class="filter-btn active" data-period="all">{{PERIOD_ALL}}</button>
+          <button class="filter-btn" data-period="today">{{PERIOD_TODAY}}</button>
+          <button class="filter-btn" data-period="week">{{PERIOD_WEEK}}</button>
+          <button class="filter-btn" data-period="month">{{PERIOD_MONTH}}</button>
+        </div>
+      </div>
+      <div class="archive-body" id="archive-feed">
+        {{ARCHIVE_ITEMS}}
+      </div>
+    </div>
+  </div>
   </main>
 
   <footer>
@@ -156,7 +189,7 @@
     <div class="footer-copy">Bitcoin Brasil News &nbsp;·&nbsp; {{FOOTER_UPDATED}} &nbsp;·&nbsp; © 2025–2026 &nbsp;·&nbsp; <a href="{{FOOTER_PRIVACY_URL}}" style="color:var(--orange);text-decoration:none;border-bottom:1px solid rgba(247,147,26,0.35);">{{FOOTER_PRIVACY_TEXT}}</a></div>
   </footer>
   <script>window.__BBN_CONFIG__ = {{BBN_CONFIG}};</script>
-  <script src="/app.js?v=1.19" defer></script>
+  <script src="/app.js?v=2.5" defer></script>
   <!-- Cloudflare Web Analytics --><script defer src='https://static.cloudflareinsights.com/beacon.min.js' data-cf-beacon='{"token": "95d43404634540c89039a8ce4c815372"}'></script><!-- End Cloudflare Web Analytics -->
 </body>
 
