@@ -102,14 +102,49 @@ export function esc(str) {
 }
 
 /**
+ * Safely serialize JSON for embedding inside HTML <script> tags,
+ * preventing </script> breakout and line-separator syntax errors.
+ */
+export function safeJsonForScript(data, space) {
+  return JSON.stringify(data, null, space)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * Sanitize an existing slug to strictly URL-safe lowercase ASCII [a-z0-9-],
+ * preventing path traversal and attribute/JS injection without altering valid slugs.
+ */
+export function sanitizeSlug(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+/**
  * Apply inline formatting (bold, italic, code, links).
+ * Only allows http:// and https:// schemes in Markdown links.
  */
 export function inlineFormat(text) {
   return esc(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    .replace(/\[(.+?)\]\((.+?)\)/g, (_, label, rawUrl) => {
+      const decodedUrl = rawUrl.replace(/&amp;/g, '&').trim();
+      const safeHref = /^https?:\/\//i.test(decodedUrl) ? decodedUrl : '';
+      return safeHref
+        ? `<a href="${esc(safeHref)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+        : label;
+    });
 }
 
 /**

@@ -4,15 +4,17 @@
 // ============================================================
 
 import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve, sep } from 'path';
 import { fileURLToPath } from 'url';
 import 'dotenv/config';
 import {
   toSlug,
+  sanitizeSlug,
   extractTitle,
   extractBody,
   contentToHTML,
   esc,
+  safeJsonForScript,
   renderArticleContent,
   assembleFullArticleMarkdown,
   toTagSlug,
@@ -423,8 +425,8 @@ function parseLocalizedArticles(rawArticles) {
         const content = d.content || d.conteudo_blog || d.article_lead || '';
         const title = (d.title || d.headline || extractTitle(content)).replace(/\*\*/g, '').trim();
         const body = extractBody(content, title);
-        let slug = d.slug || toSlug(title);
-        if (slugMapEn[slug]) slug = `${slug}-${row.id}`;
+        let slug = sanitizeSlug(d.slug) || toSlug(title);
+        if (slugMapEn[slug]) slug = `${slug}-${sanitizeSlug(String(row.id)) || row.id}`;
         const enParsedTags = d.parsedTags || parseTags(d.tag || d.tags || extractTagsFromContent(title, content));
         enPost = {
           id: String(row.id),
@@ -450,8 +452,8 @@ function parseLocalizedArticles(rawArticles) {
         const content = d.content || d.conteudo_blog || d.article_lead || '';
         const title = (d.title || d.headline || extractTitle(content)).replace(/\*\*/g, '').trim();
         const body = extractBody(content, title);
-        let slug = d.slug || toSlug(title);
-        if (slugMapPt[slug]) slug = `${slug}-${row.id}`;
+        let slug = sanitizeSlug(d.slug) || toSlug(title);
+        if (slugMapPt[slug]) slug = `${slug}-${sanitizeSlug(String(row.id)) || row.id}`;
         const ptParsedTags = d.parsedTags || parseTags(d.tag || d.tags || extractTagsFromContent(title, content));
         ptPost = {
           id: String(row.id),
@@ -716,8 +718,8 @@ function generateArticlePage(post, template, lang) {
   const langEnActive = lang === 'en' ? ' active' : '';
   const langPtActive = lang === 'pt' ? ' active' : '';
 
-  // JSON-LD NewsArticle
-  const jsonLdArticle = JSON.stringify({
+  // JSON-LD NewsArticle (escaped against </script> breakout)
+  const jsonLdArticle = safeJsonForScript({
     "@context": "https://schema.org",
     "@type": "NewsArticle",
     "headline": post.title,
@@ -740,9 +742,9 @@ function generateArticlePage(post, template, lang) {
     },
     "isAccessibleForFree": true,
     "inLanguage": dict.htmlLang
-  }, null, 4);
+  }, 4);
 
-  const bbnConfigArticle = JSON.stringify({
+  const bbnConfigArticle = safeJsonForScript({
     url: CONFIG.supabaseUrl,
     key: CONFIG.supabaseKey
   });
@@ -836,7 +838,7 @@ function generateTagArchivePage(tagEntry, template, lang, groupedTags, topTags, 
   });
   const archiveGridHtml = generateArchiveGrid(tagEntry.articles, lang);
 
-  const bbnConfig = JSON.stringify({
+  const bbnConfig = safeJsonForScript({
     url: CONFIG.supabaseUrl,
     key: CONFIG.supabaseKey
   });
@@ -912,7 +914,7 @@ function generateRegionArchivePage(region, template, lang, groupedTags, topTags,
 
   const archiveGridHtml = generateArchiveGrid(articles, lang);
 
-  const bbnConfig = JSON.stringify({
+  const bbnConfig = safeJsonForScript({
     url: CONFIG.supabaseUrl,
     key: CONFIG.supabaseKey
   });
@@ -1065,7 +1067,7 @@ function generateHomePage(articles, template, lang = 'en', tagCloudHtml = '') {
     .map(a => `          <li><a href="/${lang}/news/${a.slug}">${esc(a.title)}</a></li>`)
     .join('\n');
 
-  const bbnConfig = JSON.stringify({
+  const bbnConfig = safeJsonForScript({
     url: CONFIG.supabaseUrl,
     key: CONFIG.supabaseKey
   });
@@ -1666,7 +1668,7 @@ async function build() {
     { lang: 'pt', articles: ptPosts, homepage: ptHomepage, privacyBody: PRIVACY_BODY_PT }
   ];
 
-  const bbnConfigJson = JSON.stringify({ url: CONFIG.supabaseUrl, key: CONFIG.supabaseKey });
+  const bbnConfigJson = safeJsonForScript({ url: CONFIG.supabaseUrl, key: CONFIG.supabaseKey });
 
   for (const loc of locales) {
     const { lang, articles, homepage, privacyBody } = loc;
@@ -1740,9 +1742,16 @@ async function build() {
 
     // C. Tag Archive Pages (/lang/tag/[slug]/index.html)
     let tagsBuilt = 0;
+    const tagBaseDir = resolve(locDir, 'tag');
     for (const [tagSlug, tagEntry] of currentTagMap) {
+      const safeTagSlug = sanitizeSlug(tagSlug);
+      if (!safeTagSlug) continue;
+      const tagDir = resolve(tagBaseDir, safeTagSlug);
+      if (!tagDir.startsWith(tagBaseDir + sep)) {
+        console.warn(`⚠️ Skipping unsafe tag slug outside build directory: ${tagSlug}`);
+        continue;
+      }
       const tagPageHtml = generateTagArchivePage(tagEntry, tagTemplate, lang, groupedTags, topTags, otherTagMap);
-      const tagDir = join(locDir, 'tag', tagSlug);
       ensureDir(tagDir);
       writeFileSync(join(tagDir, 'index.html'), tagPageHtml, 'utf-8');
       tagsBuilt++;
@@ -1815,11 +1824,19 @@ async function build() {
 
     // E. Article Pages (/lang/news/[slug].html & /lang/news/[slug]/index.html)
     let articlesBuilt = 0;
+    const newsBaseDir = resolve(locDir, 'news');
     for (const post of articles) {
+      const safePostSlug = sanitizeSlug(post.slug);
+      if (!safePostSlug) continue;
+      const artCleanDir = resolve(newsBaseDir, safePostSlug);
+      if (!artCleanDir.startsWith(newsBaseDir + sep)) {
+        console.warn(`⚠️ Skipping unsafe article slug outside build directory: ${post.slug}`);
+        continue;
+      }
+      post.slug = safePostSlug;
       const artHtml = generateArticlePage(post, articleTemplate, lang);
 
       // Clean directory-based URL structure for native server resolution
-      const artCleanDir = join(locDir, 'news', post.slug);
       ensureDir(artCleanDir);
       writeFileSync(join(artCleanDir, 'index.html'), artHtml, 'utf-8');
 

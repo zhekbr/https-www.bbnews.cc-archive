@@ -280,12 +280,29 @@ function contentToHTML(text) {
   return html;
 }
 
+function sanitizeSlug(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  return raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function inlineFormat(text) {
   return esc(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    .replace(/\[(.+?)\]\((.+?)\)/g, (_, label, rawUrl) => {
+      const decodedUrl = rawUrl.replace(/&amp;/g, '&').trim();
+      const safeHref = /^https?:\/\//i.test(decodedUrl) ? decodedUrl : '';
+      return safeHref
+        ? `<a href="${esc(safeHref)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+        : label;
+    });
 }
 
 // Garante que URLs de links externos não usem esquemas perigosos (ex: javascript:)
@@ -812,8 +829,8 @@ function processArticleRows(rows) {
     }
 
     const title = (rawTitle || (locale === 'pt' ? 'Sem título' : 'Untitled')).replace(/\*\*/g, '').trim();
-    let slug = row.slug || toSlug(title);
-    if (slugMap[slug] && String(slugMap[slug].id) !== String(row.id)) slug = `${slug}-${row.id}`;
+    let slug = sanitizeSlug(row.slug) || toSlug(title);
+    if (slugMap[slug] && String(slugMap[slug].id) !== String(row.id)) slug = `${slug}-${sanitizeSlug(String(row.id)) || row.id}`;
     
     const assembledBody = assembleFullArticleMarkdown(row, locale);
     const body = explicitContent || assembledBody || '';
@@ -1016,7 +1033,7 @@ function panelTemplate(item) {
       </div>
       <div class="panel-actions" style="margin-top:0.3rem;">
         <a class="panel-btn btn-primary"
-           href="/${getCurrentLocale()}/news/${item._slug}" onclick="event.preventDefault(); goArticle('${item._slug}')">${getCurrentLocale() === 'pt' ? '→ Ler artigo completo' : '→ Read full article'}</a>
+           href="/${getCurrentLocale()}/news/${encodeURIComponent(item._slug)}" data-article-slug="${esc(item._slug)}">${getCurrentLocale() === 'pt' ? '→ Ler artigo completo' : '→ Read full article'}</a>
         <button class="panel-btn btn-ghost" onclick="closePanel()">${getCurrentLocale() === 'pt' ? '✕ Fechar' : '✕ Close'}</button>
       </div>
     </div>
@@ -1058,6 +1075,13 @@ function makeCard(item, rowIdx, votesMap) {
     card.classList.add('active');
     activeCard = card;
     panel.innerHTML = panelTemplate(item);
+    const readLink = panel.querySelector('[data-article-slug]');
+    if (readLink) {
+      readLink.addEventListener('click', (e) => {
+        e.preventDefault();
+        goArticle(readLink.dataset.articleSlug);
+      });
+    }
     panel.classList.add('open');
     if (row) row.classList.add('is-paused');
     panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });

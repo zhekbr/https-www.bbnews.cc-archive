@@ -1080,7 +1080,7 @@
             },
             {
               "name": "Authorization",
-              "value": "Bearer jina_19c2c904c29e4ba6ab80a29148209960CxbPL20HQAqgdt3pUoIDHg6alID_"
+              "value": "=Bearer {{ $env.JINA_API_KEY }}"
             }
           ]
         },
