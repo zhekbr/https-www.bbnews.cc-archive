@@ -448,29 +448,13 @@ function renderArticleContent(row, lang) {
     }
   }
 
-  // 7. Source Attribution (only if safe valid URL and not an image link)
-  const safeSourceUrl = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
-  if (safeSourceUrl) {
-    const displayName = (row.source_name || safeSourceUrl).trim();
-    sections.push(`
-      <footer class="wire-source-attribution">
-        <a href="${esc(safeSourceUrl)}" target="_blank" rel="noopener noreferrer" class="wire-source-link">
-          ${HEADINGS.source}: ${esc(displayName)}
-        </a>
-      </footer>
-    `);
-  }
-
   return sections.join('\n');
 }
 
 function renderArticle(post) {
   const container = document.getElementById('article-container');
-  const safeLink = sanitizeSourceUrl(post.source_url || post.link, post.USE_LINK);
   const locale = getCurrentLocale();
-  const sourceBtn = safeLink
-    ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">${locale === 'pt' ? '→ Ver fonte original' : '→ View original source'}</a>`
-    : '';
+  const sourceBtn = '';
 
   const hasStructured = Boolean(
     isValidSection(post.article_lead) || isValidSection(post.data_figures) || isValidSection(post.scenario) ||
@@ -752,12 +736,6 @@ function assembleFullArticleMarkdown(row, lang) {
   // If no substantive content sections exist, do NOT return only a source link
   if (sections.length === 0) {
     return '';
-  }
-
-  const safeSource = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
-  const sourceName = (row.source_name || safeSource).trim();
-  if (safeSource) {
-    sections.push(`**${isPt ? 'Fonte' : 'Source'}:** [${sourceName}](${safeSource})`);
   }
 
   return sections.join('\n\n');

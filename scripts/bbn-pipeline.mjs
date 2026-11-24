@@ -443,12 +443,11 @@ Link: ${item.link}
 Content: ${fullText}`;
 }
 
-function assembleFallbackMarkdown(ed, item, lang) {
+function assembleFallbackMarkdown(ed, _item, lang) {
   const isPt = lang === 'pt';
   const parts = [ed.article_lead];
   if (ed.scenario) parts.push(`## ${isPt ? 'O Cenário' : 'The Scenario'}\n\n${ed.scenario}`);
   if (ed.insight) parts.push(`## ${isPt ? 'Análise BBN' : 'BBN Insight'}\n\n${ed.insight}`);
-  parts.push(`${isPt ? 'Fonte' : 'Source'}: ${item.source} (${item.link})`);
   return parts.filter(Boolean).join('\n\n');
 }
 
@@ -593,7 +592,7 @@ async function main() {
           link: item.link,
           source_name: item.source,
           img_post: imgPostUrl || undefined,
-          USE_LINK: 'yes',
+          USE_LINK: 'no',
           slug: toSlug(cleanEnHeadline),
         };
 
@@ -615,7 +614,7 @@ async function main() {
           link: item.link,
           source_name: item.source,
           img_post: imgPostUrl || undefined,
-          USE_LINK: 'yes',
+          USE_LINK: 'no',
           slug: toSlug(cleanPtHeadline),
         };
 

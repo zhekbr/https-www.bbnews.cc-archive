@@ -365,19 +365,6 @@ export function renderArticleContent(row, lang = 'en') {
     }
   }
 
-  // 7. Source Attribution (only if safe valid URL and not an image link)
-  const safeSourceUrl = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
-  if (safeSourceUrl) {
-    const displayName = (row.source_name || safeSourceUrl).trim();
-    sections.push(`
-      <footer class="wire-source-attribution">
-        <a href="${esc(safeSourceUrl)}" target="_blank" rel="noopener noreferrer" class="wire-source-link">
-          ${HEADINGS.source}: ${esc(displayName)}
-        </a>
-      </footer>
-    `);
-  }
-
   return sections.join('\n');
 }
 
@@ -412,12 +399,6 @@ export function assembleFullArticleMarkdown(row, lang = 'en') {
   // CRITICAL: If no substantive content sections exist, do NOT return only a source link
   if (sections.length === 0) {
     return '';
-  }
-
-  const safeSource = sanitizeSourceUrl(row.source_url || row.link, row.USE_LINK);
-  const sourceName = (row.source_name || safeSource).trim();
-  if (safeSource) {
-    sections.push(`**${isPt ? 'Fonte' : 'Source'}:** [${sourceName}](${safeSource})`);
   }
 
   return sections.join('\n\n');

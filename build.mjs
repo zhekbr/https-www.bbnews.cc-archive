@@ -685,10 +685,7 @@ function generateArticlePage(post, template, lang) {
   const articleBodyHtml = hasStructuredSections
     ? renderArticleContent(post, lang)
     : contentToHTML(post.body || post.conteudo_blog || '');
-  const safeLink = sanitizeSourceUrl(post.link, post.USE_LINK);
-  const sourceBtn = safeLink
-    ? `<a class="article-source-btn" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">${dict.viewOriginalSource}</a>`
-    : '';
+  const sourceBtn = '';
 
   const articleCategory = (post.tags && post.tags.length > 0)
     ? post.tags[0].charAt(0).toUpperCase() + post.tags[0].slice(1)
