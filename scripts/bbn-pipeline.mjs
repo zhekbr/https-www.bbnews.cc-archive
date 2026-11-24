@@ -16,6 +16,8 @@ const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === 't
 const MAX_ANALYZE = parseInt(process.env.BBN_MAX_ANALYZE || '10', 10);
 const MAX_PUBLISH = parseInt(process.env.BBN_MAX_PUBLISH || '4', 10);
 const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
+const MAX_AI_SIMILARITY = parseInt(process.env.BBN_MAX_SIMILARITY || '60', 10);
+const MAX_LOCAL_SIMILARITY = parseInt(process.env.BBN_MAX_LOCAL_SIMILARITY || '50', 10);
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
 const OPENROUTER_MODELS = (
@@ -99,6 +101,56 @@ const SECONDARY_KEYWORDS = [
 
 const VIP_KEYWORDS = ['bitcoin', 'btc', 'crypto', 'criptomoeda', 'criptomoedas'];
 const HIGH_IMPACT_KEYWORDS = ['war', 'guerra', 'ataque', 'strike', 'sanction', 'sanção', 'crash', 'collapse', 'colapso'];
+
+const DEDUPE_STOP_WORDS = new Set([
+  'the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'over', 'after', 'amid',
+  'says', 'said', 'will', 'new', 'more', 'than', 'about', 'under', 'between', 'against',
+  'news', 'report', 'reports', 'global', 'world', 'market', 'markets', 'crypto', 'raises',
+  'para', 'com', 'por', 'que', 'dos', 'das', 'nos', 'nas', 'uma', 'como', 'sobre', 'apos',
+  'entre', 'contra', 'novo', 'nova', 'global', 'mundo', 'mercado', 'mercados', 'cripto',
+]);
+
+function extractSignificantTokens(text) {
+  return new Set(
+    String(text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length >= 3 && !DEDUPE_STOP_WORDS.has(w))
+  );
+}
+
+// Layer 1 local similarity metric (0..100) using weighted token overlap + Jaccard
+function calcLocalSimilarity(textA, textB) {
+  const setA = extractSignificantTokens(textA);
+  const setB = extractSignificantTokens(textB);
+  if (setA.size === 0 || setB.size === 0) return 0;
+
+  let shared = 0;
+  for (const token of setA) {
+    if (setB.has(token)) shared++;
+  }
+  if (shared < 2) return 0;
+
+  const overlap = shared / Math.min(setA.size, setB.size);
+  const jaccard = shared / (setA.size + setB.size - shared);
+  return Math.round((overlap * 0.65 + jaccard * 0.35) * 100);
+}
+
+function findMostSimilarLocal(candidateTitle, recentHeadlines) {
+  let bestScore = 0;
+  let bestMatch = '';
+  for (const existing of recentHeadlines) {
+    const score = calcLocalSimilarity(candidateTitle, existing);
+    if (score > bestScore) {
+      bestScore = score;
+      bestMatch = existing;
+    }
+  }
+  return { score: bestScore, match: bestMatch };
+}
 
 // ── Helpers ─────────────────────────────────────────────────
 function decodeEntities(str) {
@@ -437,7 +489,7 @@ function buildSchemaMatchedPayload(allowedCols, data) {
 }
 
 // ── Prompts ─────────────────────────────────────────────────
-function buildAnalyzerPrompt(item) {
+function buildAnalyzerPrompt(item, recentHeadlines = []) {
   const urgencyContext =
     item.preScore >= 9
       ? 'EXTREME URGENCY — Black Swan event. This could reshape global markets immediately.'
@@ -450,9 +502,16 @@ function buildAnalyzerPrompt(item) {
       ? `WARNING: The content snippet is very short (${item.contentSnippet.length} chars). Write only what is explicitly stated. If insufficient, set score <= 3.`
       : 'Content is sufficient.';
 
+  const recentList = recentHeadlines.length > 0
+    ? recentHeadlines.slice(0, 30).map((h, i) => `${i + 1}. ${h}`).join('\n')
+    : '(none)';
+
   return `You are a Senior Breaking News Editor specializing in Global Geopolitics and Bitcoin Markets.
 
-ARTICLE DATA:
+ALREADY PUBLISHED HEADLINES (last 48h — DO NOT duplicate any of these events):
+${recentList}
+
+NEW CANDIDATE ARTICLE:
 - Title: ${item.title}
 - Source: ${item.source} (${item.domain})
 - Published: ${item.pubDate}
@@ -467,9 +526,19 @@ Return ONLY a valid JSON object with these exact keys:
   "headline": "High-impact headline in English, max 15 words",
   "hook": "One sharp opening sentence in English, max 25 words",
   "score": 8,
+  "similarity_score": 0,
+  "similar_to": "",
+  "is_duplicate": false,
   "should_alert": true,
   "tags": "#Bitcoin #Geopolitics"
 }
+
+DUPLICATE & SIMILARITY GUIDE (0 to 100):
+- 80-100: Same exact event/verdict/attack/announcement covered by another outlet or angle (set is_duplicate=true, should_alert=false)
+- 60-79: Essentially the same news story with minor extra detail (set is_duplicate=true, should_alert=false)
+- 25-59: Same broad theme (e.g. both about Bitcoin or US politics) but clearly a DIFFERENT event (is_duplicate=false)
+- 0-24: Completely unrelated to all already published headlines (is_duplicate=false)
+- Put the closest existing headline in "similar_to" when similarity_score >= 40, otherwise "".
 
 SCORING GUIDE (be strict, do not inflate):
 - 9-10: True Black Swan — active major war escalation, central bank collapse, exchange hack > $1B
@@ -479,7 +548,8 @@ SCORING GUIDE (be strict, do not inflate):
 
 RULES:
 - score MUST be a whole integer 1-10
-- should_alert MUST be boolean true only if score >= ${MIN_ALERT_SCORE}`;
+- similarity_score MUST be a whole integer 0-100
+- should_alert MUST be boolean true ONLY if score >= ${MIN_ALERT_SCORE} AND is_duplicate is false AND similarity_score < ${MAX_AI_SIMILARITY}`;
 }
 
 function buildEditorialPrompt(item, fullText, lang) {
@@ -560,22 +630,38 @@ async function main() {
 
   const existingLinks = new Set();
   const existingTitles = new Set();
+  const recentHeadlines48h = [];
+  const cutoff48h = Date.now() - 48 * 60 * 60 * 1000;
+
   for (const row of recentEn) {
     const u = (row.source_url || row.link || '').split('?')[0].split('#')[0].trim().toLowerCase();
     if (u) existingLinks.add(u);
-    const t = toSlug(row.headline || row.title || '');
+    const hl = String(row.headline || row.title || '').replace(/\*\*/g, '').trim();
+    const t = toSlug(hl);
     if (t) existingTitles.add(t);
+    const createdMs = row.created_at ? new Date(row.created_at).getTime() : 0;
+    if (hl && (!createdMs || createdMs >= cutoff48h)) {
+      recentHeadlines48h.push(hl);
+    }
   }
 
   const freshCandidates = ranked
     .filter((item) => {
       const linkLower = item.cleanLink.toLowerCase();
       const titleSlug = toSlug(item.title);
-      return !existingLinks.has(linkLower) && !existingTitles.has(titleSlug);
+      if (existingLinks.has(linkLower) || existingTitles.has(titleSlug)) return false;
+
+      // Layer 1: Local similarity pre-filter against last 48h headlines
+      const localSim = findMostSimilarLocal(item.title, recentHeadlines48h);
+      if (localSim.score >= MAX_LOCAL_SIMILARITY) {
+        console.log(`🔁 [Dedupe-L1] localSim=${localSim.score}/100 | Skipping "${item.title.slice(0, 60)}" (similar to "${localSim.match.slice(0, 55)}")`);
+        return false;
+      }
+      return true;
     })
     .slice(0, MAX_ANALYZE);
 
-  console.log(`🆕 [Dedupe] ${freshCandidates.length} new candidates to analyze with Groq`);
+  console.log(`🆕 [Dedupe] ${freshCandidates.length} new candidates to analyze with Groq (48h reference headlines: ${recentHeadlines48h.length})`);
   if (freshCandidates.length === 0) {
     console.log('✅ Nothing new to publish. Exiting.');
     return;
@@ -592,17 +678,27 @@ async function main() {
     for (const item of freshCandidates) {
       if (publishedCount >= MAX_PUBLISH) break;
 
+      // Re-check Layer 1 against articles already published earlier in THIS SAME run
+      const intraRunSim = findMostSimilarLocal(item.title, recentHeadlines48h);
+      if (intraRunSim.score >= MAX_LOCAL_SIMILARITY) {
+        console.log(`🔁 [Dedupe-L1] localSim=${intraRunSim.score}/100 (same-run) | Skipping "${item.title.slice(0, 60)}"`);
+        continue;
+      }
+
       let analysis;
       try {
-        analysis = await callGroqJSON(buildAnalyzerPrompt(item));
+        analysis = await callGroqJSON(buildAnalyzerPrompt(item, recentHeadlines48h));
       } catch (err) {
         console.error(`❌ [Analyzer] Failed for "${item.title}": ${err.message}`);
         continue;
       }
 
       const score = parseInt(analysis?.score, 10) || 0;
-      const shouldAlert = Boolean(analysis?.should_alert) && score >= MIN_ALERT_SCORE;
-      console.log(`📊 [Analyzer] score=${score}/10 alert=${shouldAlert} | ${item.title.slice(0, 70)}`);
+      const aiSim = Math.max(0, Math.min(100, parseInt(analysis?.similarity_score, 10) || 0));
+      const isDuplicate = Boolean(analysis?.is_duplicate) || aiSim >= MAX_AI_SIMILARITY;
+      const shouldAlert = Boolean(analysis?.should_alert) && score >= MIN_ALERT_SCORE && !isDuplicate;
+      const simNote = analysis?.similar_to ? ` similarTo="${String(analysis.similar_to).slice(0, 45)}"` : '';
+      console.log(`📊 [Analyzer] score=${score}/10 aiSim=${aiSim}/100 dup=${isDuplicate} alert=${shouldAlert}${simNote} | ${item.title.slice(0, 65)}`);
 
       if (!shouldAlert) continue;
 
@@ -708,6 +804,8 @@ async function main() {
         }
 
         publishedCount++;
+        // Register both the generated headline and raw RSS title so later candidates in this same run are deduplicated
+        recentHeadlines48h.unshift(cleanEnHeadline, item.title);
       } catch (err) {
         console.error(`❌ [Publish] Failed for "${item.title}": ${err.message}`);
       }
