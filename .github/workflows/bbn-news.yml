@@ -1,9 +1,5 @@
 name: BBN Breaking News Pipeline
-
 on:
-  schedule:
-    # Roda automaticamente a cada 15 minutos
-    - cron: '*/6 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -14,25 +10,22 @@ on:
         options:
           - 'false'
           - 'true'
-
 concurrency:
   group: bbn-news-pipeline
   cancel-in-progress: false
-
 jobs:
   fetch-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
+      - name: Install puppeteer-core (uses pre-installed Chrome on ubuntu-latest)
+        run: npm install --no-save puppeteer-core@^22.15.0
       - name: Run BBN Breaking News Pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -40,5 +33,6 @@ jobs:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
           GROQ_MODEL: openai/gpt-oss-120b
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
+          PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: node scripts/bbn-pipeline.mjs
