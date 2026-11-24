@@ -1,7 +1,8 @@
 // ============================================================
 // BBN Image Generator — scripts/generate-image.mjs
-// Renders 1200x1200 PNG cards using pre-installed Chrome + puppeteer-core
-// and uploads directly to Supabase Storage bucket `img_post`.
+// Smart visual search (Wikimedia Commons anti-logo filter -> Pexels fallback)
+// + 1200x1200 PNG rendering using pre-installed Chrome + puppeteer-core
+// + Upload to Supabase Storage bucket `img_post`.
 // ============================================================
 
 import crypto from 'crypto';
@@ -13,6 +14,10 @@ const STOP_WORDS = new Set([
   'from', 'by', 'in', 'of', 'as', 'is', 'are', 'was', 'were', 'be', 'been',
   'with', 'after', 'amid', 'over', 'into', 'new', 'says', 'raises', 'hits',
 ]);
+
+// Reject logos, flags, maps, diagrams, icons, coats of arms, watermarks
+const WIKIMEDIA_BLOCKED_RE =
+  /(logo|flag|map|coat[\s_-]of[\s_-]arms|seal|emblem|icon|banner|diagram|chart|signature|stamp|crest|badge|symbol|locator|outline|blank|vector|watermark|screenshot|headline|newspaper|cover|poster)/i;
 
 function detectChromeExecutable() {
   const candidates = [
@@ -37,14 +42,101 @@ export function extractPexelsQuery(headline) {
     .toLowerCase()
     .split(/\s+/)
     .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
-  return words.slice(0, 2).join(' ') || 'bitcoin finance';
+  return words.slice(0, 3).join(' ') || 'bitcoin finance';
 }
 
-export async function searchPexelsImage(headline, pexelsApiKey) {
-  if (!pexelsApiKey) return '';
-  const queries = [extractPexelsQuery(headline), 'bitcoin finance news'];
+export async function searchWikimediaImage(query) {
+  const cleanQuery = String(query || '').trim();
+  if (!cleanQuery) return '';
 
+  try {
+    const params = new URLSearchParams({
+      action: 'query',
+      generator: 'search',
+      gsrnamespace: '6',
+      gsrsearch: `${cleanQuery} filetype:bitmap`,
+      gsrlimit: '12',
+      prop: 'imageinfo',
+      iiprop: 'url|size|mime',
+      iiurlwidth: '1600',
+      format: 'json',
+    });
+
+    const res = await fetch(`https://commons.wikimedia.org/w/api.php?${params.toString()}`, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'User-Agent': 'BBN-NewsBot/1.0 (https://bbnews.cc; contact@bbnews.cc)',
+      },
+    });
+    if (!res.ok) return '';
+
+    const data = await res.json();
+    const pages = Object.values(data?.query?.pages || {});
+    const queryWords = cleanQuery
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+
+    const candidates = [];
+    for (const page of pages) {
+      const title = String(page?.title || '');
+      const titleLower = title.toLowerCase();
+      const info = page?.imageinfo?.[0];
+      if (!info) continue;
+
+      const mime = String(info.mime || '').toLowerCase();
+      if (mime !== 'image/jpeg' && mime !== 'image/png') continue;
+
+      const width = Number(info.width) || 0;
+      const height = Number(info.height) || 0;
+      if (width < 800 || height < 500) continue;
+
+      const ratio = width / height;
+      if (ratio < 0.55 || ratio > 2.4) continue;
+
+      const url = info.thumburl || info.url || '';
+      if (!/^https?:\/\//i.test(url)) continue;
+
+      if (WIKIMEDIA_BLOCKED_RE.test(title) || WIKIMEDIA_BLOCKED_RE.test(url)) continue;
+
+      // Require the primary subject keyword to appear in the filename/title so we never pick unrelated matches
+      const matchedWords = queryWords.filter((w) => titleLower.includes(w));
+      if (queryWords.length > 0 && !titleLower.includes(queryWords[0])) continue;
+
+      // Prefer exact subject matches + JPEG real photos + higher resolution
+      const rank =
+        matchedWords.length * 25 +
+        (mime === 'image/jpeg' ? 10 : 0) +
+        (width >= 1200 ? 5 : 0) -
+        Math.abs(ratio - 1.33);
+      candidates.push({ url, rank, title });
+    }
+
+    candidates.sort((a, b) => b.rank - a.rank);
+    if (candidates[0]) {
+      console.log(`🌐 [Wikimedia] Selected photo for "${cleanQuery}": ${candidates[0].title}`);
+      return candidates[0].url;
+    }
+  } catch (err) {
+    console.warn(`[Wikimedia] Search failed for "${cleanQuery}": ${err.message}`);
+  }
+  return '';
+}
+
+export async function searchPexelsImage(queryOrHeadline, pexelsApiKey) {
+  if (!pexelsApiKey) return '';
+  const queries = [
+    String(queryOrHeadline || '').trim(),
+    extractPexelsQuery(queryOrHeadline),
+    'bitcoin finance news',
+  ].filter(Boolean);
+
+  const tried = new Set();
   for (const q of queries) {
+    if (tried.has(q.toLowerCase())) continue;
+    tried.add(q.toLowerCase());
+
     try {
       const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=3`;
       const res = await fetch(url, {
@@ -57,11 +149,33 @@ export async function searchPexelsImage(headline, pexelsApiKey) {
       if (!res.ok) continue;
       const json = await res.json();
       const photo = json?.photos?.[0]?.src?.large2x || json?.photos?.[0]?.src?.original;
-      if (photo) return photo;
+      if (photo) {
+        console.log(`📷 [Pexels] Selected photo for "${q}"`);
+        return photo;
+      }
     } catch (err) {
       console.warn(`[Pexels] Search failed for "${q}": ${err.message}`);
     }
   }
+  return '';
+}
+
+export async function findBestBackgroundImage({ headline, wikimediaQuery, pexelsQuery, pexelsApiKey }) {
+  // 1. Try Wikimedia Commons first (real editorial photos of places/people/events, no news portal logos)
+  if (wikimediaQuery) {
+    const wikiUrl = await searchWikimediaImage(wikimediaQuery);
+    if (wikiUrl) return wikiUrl;
+  }
+
+  // 2. Fallback to Pexels (clean high-res stock photography, zero watermarks)
+  const pexelsUrl = await searchPexelsImage(pexelsQuery || headline, pexelsApiKey);
+  if (pexelsUrl) return pexelsUrl;
+
+  // 3. Last-resort Wikimedia fallback using extracted keywords if Pexels key is absent
+  if (!pexelsApiKey && headline) {
+    return await searchWikimediaImage(extractPexelsQuery(headline));
+  }
+
   return '';
 }
 

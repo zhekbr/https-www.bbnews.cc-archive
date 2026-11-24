@@ -7,7 +7,7 @@
 
 import { toSlug } from '../shared.mjs';
 import {
-  searchPexelsImage,
+  findBestBackgroundImage,
   createImageRenderer,
   uploadImageToSupabase,
 } from './generate-image.mjs';
@@ -431,7 +431,9 @@ Return ONLY a flat JSON object with these exact keys:
   "quote_text": "Direct quote from a named official/source in the text (or 'Not applicable.' if none)",
   "insight": "Exclusive BBN analysis on how this impacts Bitcoin, crypto markets, and global investors",
   "market_reaction": "Immediate market/price reaction if mentioned (or 'Not applicable.' if none)",
-  "tag": "#Hashtag1 #Hashtag2 #Hashtag3"
+  "tag": "#Hashtag1 #Hashtag2 #Hashtag3",
+  "wikimedia_query": "2 to 4 English words for a real-world photo of the main person, city, building, or event (e.g. 'Kyiv Ukraine', 'Donald Trump', 'Riyadh skyline', 'Federal Reserve Washington')",
+  "pexels_query": "2 to 3 English words for a clean stock photo scene if no specific place/person applies (e.g. 'oil tanker ocean', 'bitcoin trading chart', 'stock market screen')"
 }
 
 RAW NEWS DATA:
@@ -512,15 +514,9 @@ async function main() {
 
   // 4. Analyze urgency with Groq (rotating keys) & generate post images
   let publishedCount = 0;
-  let imageRenderer = null;
-
-  if (PEXELS_API_KEY) {
-    imageRenderer = await createImageRenderer();
-    if (imageRenderer) {
-      console.log('🎨 [Image] Headless Chrome renderer ready (1200x1200 BBN template)');
-    }
-  } else {
-    console.log('ℹ️ [Image] PEXELS_API_KEY not set; skipping automatic post image generation.');
+  let imageRenderer = await createImageRenderer();
+  if (imageRenderer) {
+    console.log('🎨 [Image] Headless Chrome renderer ready (Wikimedia Commons -> Pexels -> 1200x1200 BBN template)');
   }
 
   try {
@@ -556,7 +552,12 @@ async function main() {
         let imgPostUrl = '';
         if (imageRenderer) {
           try {
-            const bgUrl = await searchPexelsImage(cleanEnHeadline, PEXELS_API_KEY);
+            const bgUrl = await findBestBackgroundImage({
+              headline: cleanEnHeadline,
+              wikimediaQuery: enEd.wikimedia_query,
+              pexelsQuery: enEd.pexels_query,
+              pexelsApiKey: PEXELS_API_KEY,
+            });
             const { buffer, filename } = await imageRenderer.render({
               title: enEd.hook || cleanEnHeadline,
               subline: 'bbnews.cc',
