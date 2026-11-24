@@ -17,6 +17,12 @@ const MAX_ANALYZE = parseInt(process.env.BBN_MAX_ANALYZE || '10', 10);
 const MAX_PUBLISH = parseInt(process.env.BBN_MAX_PUBLISH || '4', 10);
 const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
+const OPENROUTER_MODELS = (
+  process.env.OPENROUTER_MODEL
+    ? [process.env.OPENROUTER_MODEL.trim(), 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-ultra-550b-a55b:free']
+    : ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-ultra-550b-a55b:free']
+).filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
@@ -290,6 +296,71 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
   throw lastError || new Error('All Groq API keys failed');
 }
 
+// ── OpenRouter Free Long-Form Writer (with automatic Groq fallback) ──
+function extractJsonObject(raw) {
+  let cleaned = String(raw || '').trim();
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+  const firstBrace = cleaned.indexOf('{');
+  const lastBrace = cleaned.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.slice(firstBrace, lastBrace + 1);
+  }
+  return JSON.parse(cleaned);
+}
+
+async function callOpenRouterOrGroqJSON(prompt) {
+  const systemPrompt = 'You are a senior financial and geopolitical journalist. Return strictly one valid raw JSON object with no markdown fences or extra text.';
+
+  if (OPENROUTER_API_KEY) {
+    for (const model of OPENROUTER_MODELS) {
+      try {
+        const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          signal: AbortSignal.timeout(60000),
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://bbnews.cc',
+            'X-Title': 'BBN - Bitcoin Brasil News',
+          },
+          body: JSON.stringify({
+            model,
+            temperature: 0.4,
+            max_tokens: 4096,
+            response_format: { type: 'json_object' },
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: prompt },
+            ],
+          }),
+        });
+
+        if (res.status === 429 || res.status >= 500) {
+          const body = await res.text();
+          console.warn(`[OpenRouter] ${model} returned HTTP ${res.status} (${body.slice(0, 140)}); trying next model...`);
+          continue;
+        }
+        if (!res.ok) {
+          const body = await res.text();
+          console.warn(`[OpenRouter] ${model} HTTP ${res.status}: ${body.slice(0, 180)}`);
+          continue;
+        }
+
+        const data = await res.json();
+        const content = data?.choices?.[0]?.message?.content || '';
+        const parsed = extractJsonObject(content);
+        console.log(`✍️ [OpenRouter] Article generated with ${model}`);
+        return parsed;
+      } catch (err) {
+        console.warn(`[OpenRouter] ${model} failed: ${err.message}`);
+      }
+    }
+    console.warn('↩️ [Writer] OpenRouter unavailable/rate-limited; falling back to Groq...');
+  }
+
+  return await callGroqJSON(prompt, systemPrompt);
+}
+
 // ── Jina AI Reader (with safe URL validation) ───────────────
 async function fetchFullArticleText(url, fallbackSnippet) {
   if (!JINA_API_KEY || !/^https?:\/\//i.test(url)) return fallbackSnippet;
@@ -416,30 +487,29 @@ function buildEditorialPrompt(item, fullText, lang) {
   const langName = isPt ? 'PORTUGUESE (PT-BR, natural Brazilian financial journalism)' : 'ENGLISH-US (natural financial wire journalism)';
 
   return `You are the Senior Editor-in-Chief of BBN (Bitcoin Brasil News).
-Write a completely original, authoritative financial-wire article strictly grounded in the RAW NEWS DATA below.
-Do NOT invent facts. Use **bold** markdown to highlight key numbers, institutions, or crypto terms.
+Write a comprehensive, in-depth, completely original financial-wire article strictly grounded in the RAW NEWS DATA below.
+Do NOT invent facts, statistics, or quotes. Do NOT include any raw URLs or "Source:" lines in the text.
+Use **bold** markdown inside paragraphs (never inside headline) to highlight key numbers, institutions, or crypto/macro terms.
 LANGUAGE: ALL fields MUST be written strictly in ${langName}.
 
 Return ONLY a flat JSON object with these exact keys:
 {
-  "headline": "High-impact clickable title",
-  "hook": "One sharp lead sentence",
-  "summary": "2-sentence executive summary",
-  "article_lead": "1 to 2 introductory paragraphs detailing the core facts (do not repeat the headline)",
-  "data_figures": "Key numbers, percentages, prices, or dates from the source (or 'Not applicable.' if none)",
-  "scenario": "Geopolitical, economic, or regulatory background of the event",
-  "quote_text": "Direct quote from a named official/source in the text (or 'Not applicable.' if none)",
-  "insight": "Exclusive BBN analysis on how this impacts Bitcoin, crypto markets, and global investors",
-  "market_reaction": "Immediate market/price reaction if mentioned (or 'Not applicable.' if none)",
-  "tag": "#Hashtag1 #Hashtag2 #Hashtag3",
+  "headline": "High-impact clickable title without markdown asterisks",
+  "hook": "One sharp, authoritative lead sentence summarizing the core shock",
+  "summary": "2 to 3 sentence executive summary",
+  "article_lead": "2 to 3 rich, detailed introductory paragraphs covering what happened, who is involved, and why it matters immediately (separate paragraphs with \\n\\n; do not repeat the headline)",
+  "data_figures": "Detailed breakdown of concrete numbers, dollar amounts, percentages, dates, and metrics explicitly stated in the source (or '${isPt ? 'Não se aplica.' : 'Not applicable.'}' if none)",
+  "scenario": "2 to 3 thorough paragraphs explaining the geopolitical, macroeconomic, or regulatory background and historical context leading up to this event (separate paragraphs with \\n\\n)",
+  "quote_text": "Direct quote from a named official, analyst, or institution present in the source (or '${isPt ? 'Não se aplica.' : 'Not applicable.'}' if none)",
+  "insight": "2 to 3 deep analytical paragraphs explaining how this development impacts Bitcoin, crypto liquidity, institutional flows, and global markets (separate paragraphs with \\n\\n)",
+  "market_reaction": "Detailed description of immediate price, bond, oil, FX, or crypto market reaction mentioned in the source (or '${isPt ? 'Não se aplica.' : 'Not applicable.'}' if none)",
+  "tag": "#Hashtag1 #Hashtag2 #Hashtag3 #Hashtag4",
   "wikimedia_query": "2 to 4 English words for a real-world photo of the main person, city, building, or event (e.g. 'Kyiv Ukraine', 'Donald Trump', 'Riyadh skyline', 'Federal Reserve Washington')",
   "pexels_query": "2 to 3 English words for a clean stock photo scene if no specific place/person applies (e.g. 'oil tanker ocean', 'bitcoin trading chart', 'stock market screen')"
 }
 
 RAW NEWS DATA:
 Title: ${item.title}
-Source: ${item.source}
-Link: ${item.link}
 Content: ${fullText}`;
 }
 
@@ -539,10 +609,10 @@ async function main() {
       // 5. Fetch full text via Jina AI
       const fullText = await fetchFullArticleText(item.link, item.contentSnippet);
 
-      // 6. Generate EN and PT editorial versions using rotating Groq keys
+      // 6. Generate long-form EN and PT editorial versions (OpenRouter :free -> Groq fallback)
       try {
-        const enEd = await callGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
-        const ptEd = await callGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
+        const enEd = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
+        const ptEd = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
 
         const cleanEnHeadline = String(enEd.headline || analysis.headline || item.title).replace(/\*\*/g, '').trim();
         const cleanPtHeadline = String(ptEd.headline || cleanEnHeadline).replace(/\*\*/g, '').trim();
