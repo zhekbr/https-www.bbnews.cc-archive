@@ -3,7 +3,7 @@ name: BBN Breaking News Pipeline
 on:
   schedule:
     # Roda automaticamente a cada 15 minutos
-    - cron: '*/2 * * * *'
+    - cron: '*/6 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
