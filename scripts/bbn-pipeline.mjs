@@ -6,32 +6,39 @@
 // ============================================================
 
 import { toSlug } from '../shared.mjs';
+import {
+  searchPexelsImage,
+  createImageRenderer,
+  uploadImageToSupabase,
+} from './generate-image.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
 const MAX_ANALYZE = parseInt(process.env.BBN_MAX_ANALYZE || '10', 10);
 const MAX_PUBLISH = parseInt(process.env.BBN_MAX_PUBLISH || '4', 10);
 const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
+const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const JINA_API_KEY = process.env.JINA_API_KEY || '';
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 
 // Parse multiple Groq keys from GROQ_API_KEYS (comma/newline/space separated) or GROQ_API_KEY_1..N
+// Keeps only tokens starting with "gsk_" so stray labels/notes are ignored.
 function loadGroqKeys() {
   const keys = [];
   if (process.env.GROQ_API_KEYS) {
     keys.push(
       ...process.env.GROQ_API_KEYS.split(/[\s,;]+/)
         .map((k) => k.trim())
-        .filter(Boolean)
+        .filter((k) => /^gsk_/i.test(k))
     );
   }
   for (let i = 1; i <= 20; i++) {
     const k = process.env[`GROQ_API_KEY_${i}`];
-    if (k && k.trim()) keys.push(k.trim());
+    if (k && /^gsk_/i.test(k.trim())) keys.push(k.trim());
   }
-  if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.trim()) {
+  if (process.env.GROQ_API_KEY && /^gsk_/i.test(process.env.GROQ_API_KEY.trim())) {
     keys.push(process.env.GROQ_API_KEY.trim());
   }
   return [...new Set(keys)];
@@ -503,98 +510,141 @@ async function main() {
     return;
   }
 
-  // 4. Analyze urgency with Groq (rotating 6 keys)
+  // 4. Analyze urgency with Groq (rotating keys) & generate post images
   let publishedCount = 0;
+  let imageRenderer = null;
 
-  for (const item of freshCandidates) {
-    if (publishedCount >= MAX_PUBLISH) break;
-
-    let analysis;
-    try {
-      analysis = await callGroqJSON(buildAnalyzerPrompt(item));
-    } catch (err) {
-      console.error(`❌ [Analyzer] Failed for "${item.title}": ${err.message}`);
-      continue;
+  if (PEXELS_API_KEY) {
+    imageRenderer = await createImageRenderer();
+    if (imageRenderer) {
+      console.log('🎨 [Image] Headless Chrome renderer ready (1200x1200 BBN template)');
     }
+  } else {
+    console.log('ℹ️ [Image] PEXELS_API_KEY not set; skipping automatic post image generation.');
+  }
 
-    const score = parseInt(analysis?.score, 10) || 0;
-    const shouldAlert = Boolean(analysis?.should_alert) && score >= MIN_ALERT_SCORE;
-    console.log(`📊 [Analyzer] score=${score}/10 alert=${shouldAlert} | ${item.title.slice(0, 70)}`);
+  try {
+    for (const item of freshCandidates) {
+      if (publishedCount >= MAX_PUBLISH) break;
 
-    if (!shouldAlert) continue;
-
-    // 5. Fetch full text via Jina AI
-    const fullText = await fetchFullArticleText(item.link, item.contentSnippet);
-
-    // 6. Generate EN and PT editorial versions using rotating Groq keys
-    try {
-      const enEd = await callGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
-      const ptEd = await callGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
-
-      const enRaw = {
-        headline: enEd.headline || analysis.headline || item.title,
-        title: enEd.headline || analysis.headline || item.title,
-        hook: enEd.hook || analysis.hook || '',
-        summary: enEd.summary || '',
-        article_lead: enEd.article_lead || '',
-        data_figures: enEd.data_figures || 'Not applicable.',
-        scenario: enEd.scenario || '',
-        quote_text: enEd.quote_text || 'Not applicable.',
-        insight: enEd.insight || '',
-        market_reaction: enEd.market_reaction || 'Not applicable.',
-        conteudo_blog: assembleFallbackMarkdown(enEd, item, 'en'),
-        content: assembleFallbackMarkdown(enEd, item, 'en'),
-        tag: enEd.tag || analysis.tags || '#Bitcoin #Geopolitics',
-        source_url: item.link,
-        link: item.link,
-        source_name: item.source,
-        USE_LINK: 'yes',
-        slug: toSlug(enEd.headline || item.title),
-      };
-
-      const ptRaw = {
-        headline: ptEd.headline || enRaw.headline,
-        title: ptEd.headline || enRaw.headline,
-        hook: ptEd.hook || '',
-        summary: ptEd.summary || '',
-        article_lead: ptEd.article_lead || '',
-        data_figures: ptEd.data_figures || 'Não se aplica.',
-        scenario: ptEd.scenario || '',
-        quote_text: ptEd.quote_text || 'Não se aplica.',
-        insight: ptEd.insight || '',
-        market_reaction: ptEd.market_reaction || 'Não se aplica.',
-        conteudo_blog: assembleFallbackMarkdown(ptEd, item, 'pt'),
-        content: assembleFallbackMarkdown(ptEd, item, 'pt'),
-        tag: ptEd.tag || enRaw.tag,
-        source_url: item.link,
-        link: item.link,
-        source_name: item.source,
-        USE_LINK: 'yes',
-        slug: toSlug(ptEd.headline || enRaw.headline),
-      };
-
-      const enPayload = buildSchemaMatchedPayload(enCols, enRaw);
-      const ptPayload = buildSchemaMatchedPayload(ptCols, ptRaw);
-
-      await supabaseRequest('articles', {
-        method: 'POST',
-        headers: { Prefer: 'return=minimal' },
-        body: JSON.stringify(enPayload),
-      });
-      console.log(`✅ [Supabase] Inserted EN article: ${enRaw.headline}`);
-
-      if (ptCols.size > 0) {
-        await supabaseRequest('artigos', {
-          method: 'POST',
-          headers: { Prefer: 'return=minimal' },
-          body: JSON.stringify(ptPayload),
-        });
-        console.log(`✅ [Supabase] Inserted PT article: ${ptRaw.headline}`);
+      let analysis;
+      try {
+        analysis = await callGroqJSON(buildAnalyzerPrompt(item));
+      } catch (err) {
+        console.error(`❌ [Analyzer] Failed for "${item.title}": ${err.message}`);
+        continue;
       }
 
-      publishedCount++;
-    } catch (err) {
-      console.error(`❌ [Publish] Failed for "${item.title}": ${err.message}`);
+      const score = parseInt(analysis?.score, 10) || 0;
+      const shouldAlert = Boolean(analysis?.should_alert) && score >= MIN_ALERT_SCORE;
+      console.log(`📊 [Analyzer] score=${score}/10 alert=${shouldAlert} | ${item.title.slice(0, 70)}`);
+
+      if (!shouldAlert) continue;
+
+      // 5. Fetch full text via Jina AI
+      const fullText = await fetchFullArticleText(item.link, item.contentSnippet);
+
+      // 6. Generate EN and PT editorial versions using rotating Groq keys
+      try {
+        const enEd = await callGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
+        const ptEd = await callGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
+
+        const cleanEnHeadline = String(enEd.headline || analysis.headline || item.title).replace(/\*\*/g, '').trim();
+        const cleanPtHeadline = String(ptEd.headline || cleanEnHeadline).replace(/\*\*/g, '').trim();
+
+        // 7. Generate 1200x1200 PNG post card & upload to Supabase Storage (bucket: img_post)
+        let imgPostUrl = '';
+        if (imageRenderer) {
+          try {
+            const bgUrl = await searchPexelsImage(cleanEnHeadline, PEXELS_API_KEY);
+            const { buffer, filename } = await imageRenderer.render({
+              title: enEd.hook || cleanEnHeadline,
+              subline: 'bbnews.cc',
+              imgUrl: bgUrl,
+            });
+            imgPostUrl = await uploadImageToSupabase({
+              buffer,
+              filename,
+              supabaseUrl: SUPABASE_URL,
+              serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+            });
+            console.log(`🖼️ [Image] Uploaded to Supabase Storage: ${filename}`);
+          } catch (imgErr) {
+            console.warn(`⚠️ [Image] Failed for "${cleanEnHeadline}": ${imgErr.message}`);
+          }
+        }
+
+        const enRaw = {
+          headline: cleanEnHeadline,
+          title: cleanEnHeadline,
+          hook: enEd.hook || analysis.hook || '',
+          summary: enEd.summary || '',
+          article_lead: enEd.article_lead || '',
+          data_figures: enEd.data_figures || 'Not applicable.',
+          scenario: enEd.scenario || '',
+          quote_text: enEd.quote_text || 'Not applicable.',
+          insight: enEd.insight || '',
+          market_reaction: enEd.market_reaction || 'Not applicable.',
+          conteudo_blog: assembleFallbackMarkdown(enEd, item, 'en'),
+          content: assembleFallbackMarkdown(enEd, item, 'en'),
+          tag: enEd.tag || analysis.tags || '#Bitcoin #Geopolitics',
+          source_url: item.link,
+          link: item.link,
+          source_name: item.source,
+          img_post: imgPostUrl || undefined,
+          USE_LINK: 'yes',
+          slug: toSlug(cleanEnHeadline),
+        };
+
+        const ptRaw = {
+          headline: cleanPtHeadline,
+          title: cleanPtHeadline,
+          hook: ptEd.hook || '',
+          summary: ptEd.summary || '',
+          article_lead: ptEd.article_lead || '',
+          data_figures: ptEd.data_figures || 'Não se aplica.',
+          scenario: ptEd.scenario || '',
+          quote_text: ptEd.quote_text || 'Não se aplica.',
+          insight: ptEd.insight || '',
+          market_reaction: ptEd.market_reaction || 'Não se aplica.',
+          conteudo_blog: assembleFallbackMarkdown(ptEd, item, 'pt'),
+          content: assembleFallbackMarkdown(ptEd, item, 'pt'),
+          tag: ptEd.tag || enRaw.tag,
+          source_url: item.link,
+          link: item.link,
+          source_name: item.source,
+          img_post: imgPostUrl || undefined,
+          USE_LINK: 'yes',
+          slug: toSlug(cleanPtHeadline),
+        };
+
+        const enPayload = buildSchemaMatchedPayload(enCols, enRaw);
+        const ptPayload = buildSchemaMatchedPayload(ptCols, ptRaw);
+
+        await supabaseRequest('articles', {
+          method: 'POST',
+          headers: { Prefer: 'return=minimal' },
+          body: JSON.stringify(enPayload),
+        });
+        console.log(`✅ [Supabase] Inserted EN article: ${enRaw.headline}`);
+
+        if (ptCols.size > 0) {
+          await supabaseRequest('artigos', {
+            method: 'POST',
+            headers: { Prefer: 'return=minimal' },
+            body: JSON.stringify(ptPayload),
+          });
+          console.log(`✅ [Supabase] Inserted PT article: ${ptRaw.headline}`);
+        }
+
+        publishedCount++;
+      } catch (err) {
+        console.error(`❌ [Publish] Failed for "${item.title}": ${err.message}`);
+      }
+    }
+  } finally {
+    if (imageRenderer) {
+      await imageRenderer.close();
     }
   }
 
