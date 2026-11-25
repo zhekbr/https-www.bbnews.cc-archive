@@ -244,21 +244,20 @@ export async function renderPngToReelMp4({ pngBuffer, durationSec = 7 }) {
 
   try {
     fs.writeFileSync(inPng, pngBuffer);
-    const fps = 30;
-    const totalFrames = durationSec * fps;
-
-    // Gentle Ken Burns zoom-in on 1080x1920 vertical canvas + silent AAC audio (required by IG Reels)
+    // Crisp static 1080x1920 vertical MP4 + silent AAC audio (required by IG Reels)
     const args = [
       '-y',
       '-loop', '1',
+      '-framerate', '30',
       '-i', inPng,
       '-f', 'lavfi',
       '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
-      '-vf', `scale=1160:2062:force_original_aspect_ratio=increase,crop=1160:2062,zoompan=z='min(zoom+0.0004,1.07)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=${fps},format=yuv420p`,
+      '-vf', 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2,format=yuv420p',
       '-t', String(durationSec),
       '-c:v', 'libx264',
+      '-tune', 'stillimage',
       '-preset', 'veryfast',
-      '-crf', '22',
+      '-crf', '20',
       '-c:a', 'aac',
       '-b:a', '128k',
       '-shortest',

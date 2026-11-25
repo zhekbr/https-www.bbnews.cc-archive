@@ -394,6 +394,42 @@ export async function publishToPostPulse({
         ? 'INSTAGRAM(REELS)'
         : acc.type;
       results.push(label);
+
+      // For score 10 breaking news, also publish a static 1080x1080 FEED post on Instagram
+      if (
+        acc.type === 'INSTAGRAM' &&
+        platformSettings.publicationType === 'REELS' &&
+        score >= TIKTOK_PRIORITY_SCORE &&
+        imageMediaPath
+      ) {
+        const feedTime = new Date(Date.now() + (delayMinutes + 1) * 60 * 1000).toISOString();
+        const feedRes = await fetch('https://api.post-pulse.com/v1/posts', {
+          method: 'POST',
+          signal: AbortSignal.timeout(25000),
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            scheduledTime: feedTime,
+            isDraft: false,
+            publications: [
+              {
+                socialMediaAccountId: acc.id,
+                platformSettings: { type: 'INSTAGRAM', publicationType: 'FEED' },
+                posts: [{ content, attachmentPaths: [imageMediaPath] }],
+              },
+            ],
+          }),
+        });
+        if (feedRes.ok) {
+          results.push('INSTAGRAM(FEED)');
+        } else {
+          const feedErr = await feedRes.text();
+          console.warn(`⚠️ [PostPulse:INSTAGRAM(FEED)] HTTP ${feedRes.status}: ${feedErr.slice(0, 180)}`);
+        }
+      }
+
       if (acc.type === 'TIK_TOK') {
         tiktokTimestamps.push(Date.now());
         await saveTikTokPostTimestamps({ supabaseUrl, serviceRoleKey, timestamps: tiktokTimestamps });
