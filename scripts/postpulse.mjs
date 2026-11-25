@@ -166,45 +166,63 @@ export async function publishToPostPulse({
   const scheduledTime = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
   const baseText = `${String(summary || headline || '').trim()}\n\n${String(tag || '').trim()}`.trim();
 
-  const publications = DEFAULT_ACCOUNTS.map((acc) => {
+  const results = [];
+  const errors = [];
+
+  for (const acc of DEFAULT_ACCOUNTS) {
     const platformSettings = { type: acc.type };
-    if (acc.pageId) platformSettings.pageId = acc.pageId;
-    if (acc.type === 'TIKTOK') platformSettings.title = String(headline || '').slice(0, 90);
+    if (acc.type === 'INSTAGRAM') {
+      platformSettings.publicationType = 'FEED';
+    } else if (acc.type === 'FACEBOOK') {
+      platformSettings.publicationType = 'FEED';
+      if (acc.pageId) platformSettings.pageId = acc.pageId;
+    } else if (acc.type === 'TIKTOK') {
+      platformSettings.title = String(headline || '').slice(0, 90);
+      platformSettings.privacyLevel = 'PUBLIC_TO_EVERYONE';
+    }
 
     // X/Twitter 280-char safety
     const content = acc.type === 'X_TWITTER' && baseText.length > 275
       ? `${baseText.slice(0, 272)}...`
       : baseText;
 
-    return {
-      socialMediaAccountId: acc.id,
-      platformSettings,
-      posts: [
-        {
-          content,
-          attachmentPaths: [mediaPath],
-        },
-      ],
-    };
-  });
+    const res = await fetch('https://api.post-pulse.com/v1/posts', {
+      method: 'POST',
+      signal: AbortSignal.timeout(25000),
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        scheduledTime,
+        isDraft: false,
+        publications: [
+          {
+            socialMediaAccountId: acc.id,
+            platformSettings,
+            posts: [
+              {
+                content,
+                attachmentPaths: [mediaPath],
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-  const res = await fetch('https://api.post-pulse.com/v1/posts', {
-    method: 'POST',
-    signal: AbortSignal.timeout(25000),
-    headers: {
-      'Authorization': `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      scheduledTime,
-      isDraft: false,
-      publications,
-    }),
-  });
-
-  const respText = await res.text();
-  if (!res.ok) {
-    throw new Error(`PostPulse schedule failed (HTTP ${res.status}): ${respText.slice(0, 250)}`);
+    const respText = await res.text();
+    if (res.ok) {
+      results.push(acc.type);
+    } else {
+      console.warn(`⚠️ [PostPulse:${acc.type}] HTTP ${res.status}: ${respText.slice(0, 200)}`);
+      errors.push(`${acc.type}: ${respText.slice(0, 120)}`);
+    }
   }
-  return { mediaPath, scheduledTime };
+
+  if (results.length === 0) {
+    throw new Error(`All PostPulse channels failed: ${errors.join(' | ')}`);
+  }
+
+  return { mediaPath, scheduledTime, publishedChannels: results, failedChannels: errors };
 }
