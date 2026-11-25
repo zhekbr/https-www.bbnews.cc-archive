@@ -1,6 +1,3 @@
-on:
-  workflow_dispatch:
-    inputs:
       dry_run:
         description: 'Modo teste (não grava no Supabase nem consome Groq)'
         required: false
@@ -35,5 +32,8 @@ jobs:
           OPENROUTER_MODEL: google/gemma-4-31b-it:free
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
+          POSTPULSE_CLIENT_ID: ${{ secrets.POSTPULSE_CLIENT_ID }}
+          POSTPULSE_CLIENT_SECRET: ${{ secrets.POSTPULSE_CLIENT_SECRET }}
+          POSTPULSE_REFRESH_TOKEN: ${{ secrets.POSTPULSE_REFRESH_TOKEN }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: node scripts/bbn-pipeline.mjs
