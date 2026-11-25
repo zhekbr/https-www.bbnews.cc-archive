@@ -12,7 +12,44 @@ const DEFAULT_ACCOUNTS = [
   { id: 1760, type: 'THREADS' },
 ];
 
-export async function getPostPulseAccessToken({ clientId, clientSecret, refreshToken }) {
+export async function getPostPulseAccessToken({
+  clientId,
+  clientSecret,
+  refreshToken,
+  supabaseUrl,
+  serviceRoleKey,
+}) {
+  // 1. Try loading latest rotated token from private Supabase table `system_tokens`
+  let activeRefreshToken = refreshToken;
+  if (supabaseUrl && serviceRoleKey) {
+    try {
+      const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+      const getRes = await fetch(`${cleanUrl}/rest/v1/system_tokens?service=eq.postpulse&select=*`, {
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          'apikey': serviceRoleKey,
+          'Authorization': `Bearer ${serviceRoleKey}`,
+        },
+      });
+      if (getRes.ok) {
+        const rows = await getRes.json();
+        const saved = rows?.[0];
+        if (saved?.access_token && saved?.expires_at) {
+          const expiresMs = new Date(saved.expires_at).getTime();
+          if (expiresMs > Date.now() + 5 * 60 * 1000) {
+            return saved.access_token;
+          }
+        }
+        if (saved?.refresh_token) {
+          activeRefreshToken = saved.refresh_token;
+        }
+      }
+    } catch (err) {
+      console.warn(`[PostPulse] Could not read system_tokens: ${err.message}`);
+    }
+  }
+
+  // 2. Refresh OAuth2 access token (and capture rotated refresh_token)
   const res = await fetch('https://auth.post-pulse.com/oauth/token', {
     method: 'POST',
     signal: AbortSignal.timeout(15000),
@@ -21,13 +58,48 @@ export async function getPostPulseAccessToken({ clientId, clientSecret, refreshT
       grant_type: 'refresh_token',
       client_id: clientId,
       client_secret: clientSecret,
-      refresh_token: refreshToken,
+      refresh_token: activeRefreshToken,
     }),
   });
   const data = await res.json();
   if (!res.ok || !data?.access_token) {
     throw new Error(`PostPulse OAuth refresh failed (HTTP ${res.status}): ${JSON.stringify(data).slice(0, 200)}`);
   }
+
+  // 3. Persist the new access_token + rotated refresh_token back to Supabase `system_tokens`
+  if (supabaseUrl && serviceRoleKey) {
+    try {
+      const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+      const expiresInSec = Number(data.expires_in) || 82800;
+      const expiresAt = new Date(Date.now() + expiresInSec * 1000).toISOString();
+      const nextRefresh = data.refresh_token || activeRefreshToken;
+
+      const upsertRes = await fetch(`${cleanUrl}/rest/v1/system_tokens?on_conflict=service`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          'apikey': serviceRoleKey,
+          'Authorization': `Bearer ${serviceRoleKey}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify({
+          service: 'postpulse',
+          access_token: data.access_token,
+          refresh_token: nextRefresh,
+          expires_at: expiresAt,
+          updated_at: new Date().toISOString(),
+        }),
+      });
+      if (!upsertRes.ok) {
+        const errText = await upsertRes.text();
+        console.warn(`[PostPulse] Could not save rotated token to system_tokens (HTTP ${upsertRes.status}): ${errText.slice(0, 160)}`);
+      }
+    } catch (err) {
+      console.warn(`[PostPulse] Failed saving rotated token: ${err.message}`);
+    }
+  }
+
   return data.access_token;
 }
 

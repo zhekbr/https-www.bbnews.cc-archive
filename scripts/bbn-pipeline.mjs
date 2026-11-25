@@ -770,6 +770,8 @@ async function main() {
         clientId: POSTPULSE_CLIENT_ID,
         clientSecret: POSTPULSE_CLIENT_SECRET,
         refreshToken: POSTPULSE_REFRESH_TOKEN,
+        supabaseUrl: SUPABASE_URL,
+        serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
       });
       console.log('📱 [PostPulse] OAuth2 access token refreshed successfully');
     } catch (ppErr) {
