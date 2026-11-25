@@ -1,3 +1,8 @@
+name: BBN Breaking News Pipeline
+
+on:
+  workflow_dispatch:
+    inputs:
       dry_run:
         description: 'Modo teste (não grava no Supabase nem consome Groq)'
         required: false
@@ -6,22 +11,28 @@
         options:
           - 'false'
           - 'true'
+
 concurrency:
   group: bbn-news-pipeline
   cancel-in-progress: false
+
 jobs:
   fetch-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install puppeteer-core (uses pre-installed Chrome on ubuntu-latest)
+
+      - name: Install puppeteer-core
         run: npm install --no-save puppeteer-core@^22.15.0
+
       - name: Run BBN Breaking News Pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
