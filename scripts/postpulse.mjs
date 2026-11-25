@@ -42,10 +42,44 @@ export async function importPostPulseMedia({ accessToken, imageUrl }) {
     body: JSON.stringify({ url: imageUrl }),
   });
   const data = await res.json();
-  if (!res.ok || !data?.path) {
+  if (!res.ok) {
     throw new Error(`PostPulse media import failed (HTTP ${res.status}): ${JSON.stringify(data).slice(0, 200)}`);
   }
-  return data.path;
+
+  // Immediate path/s3Key response
+  const immediatePath = data?.s3Key || data?.path || data?.key;
+  if (immediatePath) return immediatePath;
+
+  // Async import flow: { id, state: "QUEUED" } -> poll GET /v1/media/upload/import/{id} until READY
+  if (!data?.id) {
+    throw new Error(`PostPulse media import unexpected response: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+
+  const importId = data.id;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    const pollRes = await fetch(`https://api.post-pulse.com/v1/media/upload/import/${importId}`, {
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    });
+    const pollData = await pollRes.json();
+    if (!pollRes.ok) {
+      throw new Error(`PostPulse import poll failed (HTTP ${pollRes.status}): ${JSON.stringify(pollData).slice(0, 200)}`);
+    }
+
+    const state = String(pollData?.state || '').toUpperCase();
+    const readyPath = pollData?.s3Key || pollData?.path || pollData?.key;
+    if ((state === 'READY' || state === 'COMPLETED') && readyPath) {
+      return readyPath;
+    }
+    if (state === 'FAILED' || state === 'ERROR') {
+      throw new Error(`PostPulse media import ${state}: ${JSON.stringify(pollData).slice(0, 200)}`);
+    }
+  }
+
+  throw new Error(`PostPulse media import #${importId} timed out waiting for READY state`);
 }
 
 export async function publishToPostPulse({
