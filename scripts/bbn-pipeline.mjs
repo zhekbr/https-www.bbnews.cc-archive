@@ -12,6 +12,10 @@ import {
   createImageRenderer,
   uploadImageToSupabase,
 } from './generate-image.mjs';
+import {
+  getPostPulseAccessToken,
+  publishToPostPulse,
+} from './postpulse.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
 const MAX_ANALYZE = parseInt(process.env.BBN_MAX_ANALYZE || '10', 10);
@@ -31,6 +35,9 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const JINA_API_KEY = process.env.JINA_API_KEY || '';
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
+const POSTPULSE_CLIENT_ID = (process.env.POSTPULSE_CLIENT_ID || '').trim();
+const POSTPULSE_CLIENT_SECRET = (process.env.POSTPULSE_CLIENT_SECRET || '').trim();
+const POSTPULSE_REFRESH_TOKEN = (process.env.POSTPULSE_REFRESH_TOKEN || '').trim();
 
 // Parse multiple Groq keys from GROQ_API_KEYS (comma/newline/space separated) or GROQ_API_KEY_1..N
 // Keeps only tokens starting with "gsk_" so stray labels/notes are ignored.
@@ -625,7 +632,7 @@ function writeGitHubStepSummary(stats) {
   if (stats.published.length > 0) {
     lines.push('### Published Articles', '');
     for (const p of stats.published) {
-      lines.push(`- **${p.enHeadline}** (PT: *${p.ptHeadline}*) — Writer: \`${p.provider}\` · Image: ${p.hasImage ? '🖼️ Yes' : '—'}`);
+      lines.push(`- **${p.enHeadline}** (PT: *${p.ptHeadline}*) — Writer: \`${p.provider}\` · Image: ${p.hasImage ? '🖼️ Yes' : '—'} · PostPulse: ${p.postedSocial ? '📱 Scheduled' : '—'}`);
     }
     lines.push('');
   }
@@ -756,6 +763,20 @@ async function main() {
     console.log('🎨 [Image] Headless Chrome renderer ready (Wikimedia Commons -> Pexels -> 1200x1200 BBN template)');
   }
 
+  let postPulseToken = '';
+  if (POSTPULSE_CLIENT_ID && POSTPULSE_CLIENT_SECRET && POSTPULSE_REFRESH_TOKEN) {
+    try {
+      postPulseToken = await getPostPulseAccessToken({
+        clientId: POSTPULSE_CLIENT_ID,
+        clientSecret: POSTPULSE_CLIENT_SECRET,
+        refreshToken: POSTPULSE_REFRESH_TOKEN,
+      });
+      console.log('📱 [PostPulse] OAuth2 access token refreshed successfully');
+    } catch (ppErr) {
+      console.warn(`⚠️ [PostPulse] Auth failed (articles will still publish to site): ${ppErr.message}`);
+    }
+  }
+
   try {
     for (const item of freshCandidates) {
       if (publishedCount >= MAX_PUBLISH) break;
@@ -836,6 +857,26 @@ async function main() {
           }
         }
 
+        // 8. Optionally publish to PostPulse (5 social channels) -> marks USE_LINK='yes' when succeeded
+        let postedSocial = false;
+        if (postPulseToken && imgPostUrl) {
+          try {
+            await publishToPostPulse({
+              accessToken: postPulseToken,
+              headline: cleanEnHeadline,
+              summary: enEd.summary || enEd.hook || cleanEnHeadline,
+              tag: enEd.tag || analysis.tags || '#Bitcoin #Crypto',
+              imageUrl: imgPostUrl,
+            });
+            postedSocial = true;
+            console.log(`📱 [PostPulse] Scheduled across 5 social accounts: ${cleanEnHeadline.slice(0, 60)}`);
+          } catch (ppErr) {
+            console.warn(`⚠️ [PostPulse] Failed for "${cleanEnHeadline}": ${ppErr.message}`);
+          }
+        }
+
+        const useLinkFlag = postedSocial ? 'yes' : 'no';
+
         const enRaw = {
           headline: cleanEnHeadline,
           title: cleanEnHeadline,
@@ -854,7 +895,7 @@ async function main() {
           link: item.link,
           source_name: item.source,
           img_post: imgPostUrl || undefined,
-          USE_LINK: 'no',
+          USE_LINK: useLinkFlag,
           slug: toSlug(cleanEnHeadline),
         };
 
@@ -876,7 +917,7 @@ async function main() {
           link: item.link,
           source_name: item.source,
           img_post: imgPostUrl || undefined,
-          USE_LINK: 'no',
+          USE_LINK: useLinkFlag,
           slug: toSlug(cleanPtHeadline),
         };
 
@@ -905,6 +946,7 @@ async function main() {
           ptHeadline: ptRaw.headline,
           provider: enResult.provider,
           hasImage: Boolean(imgPostUrl),
+          postedSocial,
         });
         // Register both the generated headline and raw RSS title so later candidates in this same run are deduplicated
         recentHeadlines48h.unshift(cleanEnHeadline, item.title);
