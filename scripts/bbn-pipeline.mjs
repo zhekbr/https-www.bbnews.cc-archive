@@ -5,6 +5,7 @@
 // 6-Key Groq Rotation (Analyzer + EN/PT Editorial) -> Jina AI -> Supabase
 // ============================================================
 
+import fs from 'fs';
 import { toSlug } from '../shared.mjs';
 import {
   findBestBackgroundImage,
@@ -237,14 +238,14 @@ async function fetchFeed(feed) {
     });
     if (!res.ok) {
       console.warn(`[RSS] ${feed.name}: HTTP ${res.status}`);
-      return [];
+      return { ok: false, name: feed.name, items: [] };
     }
     const xml = await res.text();
     const items = parseRssOrAtom(xml, feed.name);
-    return items;
+    return { ok: true, name: feed.name, items };
   } catch (err) {
     console.warn(`[RSS] ${feed.name}: failed (${err.message})`);
-    return [];
+    return { ok: false, name: feed.name, items: [] };
   }
 }
 
@@ -402,7 +403,7 @@ async function callOpenRouterOrGroqJSON(prompt) {
         const content = data?.choices?.[0]?.message?.content || '';
         const parsed = extractJsonObject(content);
         console.log(`✍️ [OpenRouter] Article generated with ${model}`);
-        return parsed;
+        return { parsed, provider: `OpenRouter (${model})` };
       } catch (err) {
         console.warn(`[OpenRouter] ${model} failed: ${err.message}`);
       }
@@ -410,7 +411,8 @@ async function callOpenRouterOrGroqJSON(prompt) {
     console.warn('↩️ [Writer] OpenRouter unavailable/rate-limited; falling back to Groq...');
   }
 
-  return await callGroqJSON(prompt, systemPrompt);
+  const parsed = await callGroqJSON(prompt, systemPrompt);
+  return { parsed, provider: `Groq (${GROQ_MODEL})` };
 }
 
 // ── Jina AI Reader (with safe URL validation) ───────────────
@@ -591,17 +593,95 @@ function assembleFallbackMarkdown(ed, _item, lang) {
   return parts.filter(Boolean).join('\n\n');
 }
 
+function writeGitHubStepSummary(stats) {
+  const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+  if (!summaryPath) return;
+
+  const statusBanner = stats.fatalFailure
+    ? '### ❌ System Error — Action Required'
+    : stats.published.length > 0
+      ? `### ✅ Healthy — Published ${stats.published.length} breaking news article(s)`
+      : `### ✅ Healthy — No new breaking news (score >= ${MIN_ALERT_SCORE}) this cycle`;
+
+  const lines = [
+    '## BBN Breaking News Pipeline Summary',
+    '',
+    statusBanner,
+    '',
+    '| Metric | Value |',
+    '| --- | --- |',
+    `| RSS Feeds OK | ${stats.feedsOk} / ${RSS_FEEDS.length} |`,
+    `| Raw RSS Items | ${stats.rawItems} |`,
+    `| Relevant Candidates | ${stats.rankedCandidates} |`,
+    `| Blocked by Local Dedupe (L1) | ${stats.blockedL1} |`,
+    `| Analyzed by Groq | ${stats.analyzerSuccess} ok / ${stats.analyzerErrors.length} failed |`,
+    `| Blocked by AI Dedupe (L2, sim >= ${MAX_AI_SIMILARITY}) | ${stats.blockedL2} |`,
+    `| Skipped (score < ${MIN_ALERT_SCORE}) | ${stats.skippedLowScore} |`,
+    `| Published Articles | **${stats.published.length}** |`,
+    `| Publish Errors | ${stats.publishErrors.length} |`,
+    '',
+  ];
+
+  if (stats.published.length > 0) {
+    lines.push('### Published Articles', '');
+    for (const p of stats.published) {
+      lines.push(`- **${p.enHeadline}** (PT: *${p.ptHeadline}*) — Writer: \`${p.provider}\` · Image: ${p.hasImage ? '🖼️ Yes' : '—'}`);
+    }
+    lines.push('');
+  }
+
+  const allErrors = [...stats.analyzerErrors, ...stats.publishErrors];
+  if (allErrors.length > 0) {
+    lines.push('### Errors Detected', '');
+    for (const err of allErrors.slice(0, 10)) {
+      lines.push(`- \`${String(err).replace(/`/g, "'")}\``);
+    }
+    lines.push('');
+  }
+
+  try {
+    fs.appendFileSync(summaryPath, lines.join('\n') + '\n', 'utf8');
+  } catch (err) {
+    console.warn(`[Summary] Could not write GITHUB_STEP_SUMMARY: ${err.message}`);
+  }
+}
+
 // ── Main ────────────────────────────────────────────────────
 async function main() {
   console.log(`🚀 [BBN Pipeline] Starting (dryRun=${DRY_RUN}, groqKeys=${GROQ_KEYS.length})`);
 
+  const stats = {
+    feedsOk: 0,
+    rawItems: 0,
+    rankedCandidates: 0,
+    blockedL1: 0,
+    analyzerSuccess: 0,
+    analyzerErrors: [],
+    blockedL2: 0,
+    skippedLowScore: 0,
+    publishAttempted: 0,
+    published: [],
+    publishErrors: [],
+    fatalFailure: false,
+  };
+
   // 1. Fetch all 20 RSS feeds in parallel
   const feedResults = await Promise.all(RSS_FEEDS.map(fetchFeed));
-  const allItems = feedResults.flat();
-  console.log(`📡 [RSS] Collected ${allItems.length} raw items from ${RSS_FEEDS.length} feeds`);
+  stats.feedsOk = feedResults.filter((f) => f.ok).length;
+  const allItems = feedResults.flatMap((f) => f.items);
+  stats.rawItems = allItems.length;
+  console.log(`📡 [RSS] Collected ${allItems.length} raw items from ${stats.feedsOk}/${RSS_FEEDS.length} feeds`);
+
+  if (stats.feedsOk === 0) {
+    stats.fatalFailure = true;
+    stats.analyzerErrors.push('All 20 RSS feeds failed to respond.');
+    writeGitHubStepSummary(stats);
+    throw new Error('All 20 RSS feeds failed to respond.');
+  }
 
   // 2. Filter & rank by recency + relevance
   const ranked = filterAndRank(allItems);
+  stats.rankedCandidates = ranked.length;
   console.log(`🎯 [Filter] ${ranked.length} relevant candidates passed Dynamic Filter`);
 
   if (DRY_RUN) {
@@ -654,6 +734,7 @@ async function main() {
       // Layer 1: Local similarity pre-filter against last 48h headlines
       const localSim = findMostSimilarLocal(item.title, recentHeadlines48h);
       if (localSim.score >= MAX_LOCAL_SIMILARITY) {
+        stats.blockedL1++;
         console.log(`🔁 [Dedupe-L1] localSim=${localSim.score}/100 | Skipping "${item.title.slice(0, 60)}" (similar to "${localSim.match.slice(0, 55)}")`);
         return false;
       }
@@ -664,6 +745,7 @@ async function main() {
   console.log(`🆕 [Dedupe] ${freshCandidates.length} new candidates to analyze with Groq (48h reference headlines: ${recentHeadlines48h.length})`);
   if (freshCandidates.length === 0) {
     console.log('✅ Nothing new to publish. Exiting.');
+    writeGitHubStepSummary(stats);
     return;
   }
 
@@ -681,6 +763,7 @@ async function main() {
       // Re-check Layer 1 against articles already published earlier in THIS SAME run
       const intraRunSim = findMostSimilarLocal(item.title, recentHeadlines48h);
       if (intraRunSim.score >= MAX_LOCAL_SIMILARITY) {
+        stats.blockedL1++;
         console.log(`🔁 [Dedupe-L1] localSim=${intraRunSim.score}/100 (same-run) | Skipping "${item.title.slice(0, 60)}"`);
         continue;
       }
@@ -688,7 +771,9 @@ async function main() {
       let analysis;
       try {
         analysis = await callGroqJSON(buildAnalyzerPrompt(item, recentHeadlines48h));
+        stats.analyzerSuccess++;
       } catch (err) {
+        stats.analyzerErrors.push(`Analyzer (${item.title.slice(0, 40)}): ${err.message}`);
         console.error(`❌ [Analyzer] Failed for "${item.title}": ${err.message}`);
         continue;
       }
@@ -700,15 +785,26 @@ async function main() {
       const simNote = analysis?.similar_to ? ` similarTo="${String(analysis.similar_to).slice(0, 45)}"` : '';
       console.log(`📊 [Analyzer] score=${score}/10 aiSim=${aiSim}/100 dup=${isDuplicate} alert=${shouldAlert}${simNote} | ${item.title.slice(0, 65)}`);
 
-      if (!shouldAlert) continue;
+      if (isDuplicate) {
+        stats.blockedL2++;
+        continue;
+      }
+      if (!shouldAlert) {
+        stats.skippedLowScore++;
+        continue;
+      }
+
+      stats.publishAttempted++;
 
       // 5. Fetch full text via Jina AI
       const fullText = await fetchFullArticleText(item.link, item.contentSnippet);
 
       // 6. Generate long-form EN and PT editorial versions (OpenRouter :free -> Groq fallback)
       try {
-        const enEd = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
-        const ptEd = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
+        const enResult = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
+        const ptResult = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
+        const enEd = enResult.parsed;
+        const ptEd = ptResult.parsed;
 
         const cleanEnHeadline = String(enEd.headline || analysis.headline || item.title).replace(/\*\*/g, '').trim();
         const cleanPtHeadline = String(ptEd.headline || cleanEnHeadline).replace(/\*\*/g, '').trim();
@@ -804,9 +900,16 @@ async function main() {
         }
 
         publishedCount++;
+        stats.published.push({
+          enHeadline: enRaw.headline,
+          ptHeadline: ptRaw.headline,
+          provider: enResult.provider,
+          hasImage: Boolean(imgPostUrl),
+        });
         // Register both the generated headline and raw RSS title so later candidates in this same run are deduplicated
         recentHeadlines48h.unshift(cleanEnHeadline, item.title);
       } catch (err) {
+        stats.publishErrors.push(`Publish (${item.title.slice(0, 40)}): ${err.message}`);
         console.error(`❌ [Publish] Failed for "${item.title}": ${err.message}`);
       }
     }
@@ -816,7 +919,22 @@ async function main() {
     }
   }
 
+  // Detect real system failures so GitHub Actions marks the run red (❌) and emails the owner
+  const allAnalyzersFailed = freshCandidates.length > 0 && stats.analyzerSuccess === 0 && stats.analyzerErrors.length > 0;
+  const allPublishesFailed = stats.publishAttempted > 0 && publishedCount === 0 && stats.publishErrors.length > 0;
+  stats.fatalFailure = allAnalyzersFailed || allPublishesFailed;
+
+  writeGitHubStepSummary(stats);
+
   console.log(`🏁 [BBN Pipeline] Done. Published ${publishedCount} breaking news article(s).`);
+
+  if (stats.fatalFailure) {
+    throw new Error(
+      allAnalyzersFailed
+        ? `All Groq analyzer calls failed (${stats.analyzerErrors.length} errors)`
+        : `All article publish attempts failed (${stats.publishErrors.length} errors)`
+    );
+  }
 }
 
 main().catch((err) => {
