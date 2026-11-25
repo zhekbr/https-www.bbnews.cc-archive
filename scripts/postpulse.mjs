@@ -7,8 +7,8 @@
 const DEFAULT_ACCOUNTS = [
   { id: 1757, type: 'INSTAGRAM' },
   { id: 1756, type: 'X_TWITTER' },
-  { id: 1758, type: 'TIKTOK' },
-  { id: 1759, type: 'FACEBOOK', pageId: '1226176870572281' },
+  { id: 1758, type: 'TIK_TOK' },
+  { id: 1759, type: 'FACEBOOK', chatId: '1226176870572281' },
   { id: 1760, type: 'THREADS' },
 ];
 
@@ -175,8 +175,7 @@ export async function publishToPostPulse({
       platformSettings.publicationType = 'FEED';
     } else if (acc.type === 'FACEBOOK') {
       platformSettings.publicationType = 'FEED';
-      if (acc.pageId) platformSettings.pageId = acc.pageId;
-    } else if (acc.type === 'TIKTOK') {
+    } else if (acc.type === 'TIK_TOK') {
       platformSettings.title = String(headline || '').slice(0, 90);
       platformSettings.privacyLevel = 'PUBLIC_TO_EVERYONE';
     }
@@ -185,6 +184,14 @@ export async function publishToPostPulse({
     const content = acc.type === 'X_TWITTER' && baseText.length > 275
       ? `${baseText.slice(0, 272)}...`
       : baseText;
+
+    const postObj = {
+      content,
+      attachmentPaths: [mediaPath],
+    };
+    if (acc.chatId) {
+      postObj.chatId = acc.chatId;
+    }
 
     const res = await fetch('https://api.post-pulse.com/v1/posts', {
       method: 'POST',
@@ -200,12 +207,7 @@ export async function publishToPostPulse({
           {
             socialMediaAccountId: acc.id,
             platformSettings,
-            posts: [
-              {
-                content,
-                attachmentPaths: [mediaPath],
-              },
-            ],
+            posts: [postObj],
           },
         ],
       }),

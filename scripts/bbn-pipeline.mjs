@@ -574,6 +574,7 @@ LANGUAGE: ALL fields MUST be written strictly in ${langName}.
 Return ONLY a flat JSON object with these exact keys:
 {
   "headline": "High-impact clickable title without markdown asterisks",
+  "image_headline": "Ultra-punchy 5 to 9 word cover headline for the social media image card (shorter and punchier than the caption, no period at the end, no markdown)",
   "hook": "One sharp, authoritative lead sentence summarizing the core shock",
   "summary": "2 to 3 sentence executive summary",
   "article_lead": "2 to 3 rich, detailed introductory paragraphs covering what happened, who is involved, and why it matters immediately (separate paragraphs with \\n\\n; do not repeat the headline)",
@@ -583,8 +584,8 @@ Return ONLY a flat JSON object with these exact keys:
   "insight": "2 to 3 deep analytical paragraphs explaining how this development impacts Bitcoin, crypto liquidity, institutional flows, and global markets (separate paragraphs with \\n\\n)",
   "market_reaction": "Detailed description of immediate price, bond, oil, FX, or crypto market reaction mentioned in the source (or '${isPt ? 'Não se aplica.' : 'Not applicable.'}' if none)",
   "tag": "#Hashtag1 #Hashtag2 #Hashtag3 #Hashtag4",
-  "wikimedia_query": "2 to 4 English words for a real-world photo of the main person, city, building, or event (e.g. 'Kyiv Ukraine', 'Donald Trump', 'Riyadh skyline', 'Federal Reserve Washington')",
-  "pexels_query": "2 to 3 English words for a clean stock photo scene if no specific place/person applies (e.g. 'oil tanker ocean', 'bitcoin trading chart', 'stock market screen')"
+  "wikimedia_query": "2 to 4 English words naming the EXACT landmark, megaproject, leader, military base, or city in the story (e.g. 'Huajiang Canyon Bridge', 'Kyiv Ukraine', 'Donald Trump', 'Federal Reserve Washington') — NEVER generic words like 'construction' or 'people'",
+  "pexels_query": "2 to 4 English words for a dramatic, high-scale editorial scene matching the exact scale of the story (e.g. 'giant suspension bridge canyon', 'fighter jet military runway', 'oil tanker ocean', 'bitcoin dark chart') — NEVER small-scale generic scenes like 'concrete mixer', 'construction worker', or 'office meeting'"
 }
 
 RAW NEWS DATA:
@@ -842,8 +843,12 @@ async function main() {
               pexelsQuery: enEd.pexels_query,
               pexelsApiKey: PEXELS_API_KEY,
             });
+            const cardTitle = String(enEd.image_headline || cleanEnHeadline)
+              .replace(/\*\*/g, '')
+              .replace(/\.+$/, '')
+              .trim();
             const { buffer, filename } = await imageRenderer.render({
-              title: enEd.hook || cleanEnHeadline,
+              title: cardTitle,
               subline: 'bbnews.cc',
               imgUrl: bgUrl,
             });
