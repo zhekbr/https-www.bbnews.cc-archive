@@ -17,8 +17,11 @@ const DEFAULT_FB_CHAT_ID = process.env.POSTPULSE_FACEBOOK_PAGE_ID || '1226176870
 
 function normalizePlatformType(raw) {
   const up = String(raw || '').toUpperCase().replace(/[^A-Z0-9_]/g, '');
-  if (up === 'TIKTOK') return 'TIK_TOK';
-  if (up === 'X' || up === 'TWITTER') return 'X_TWITTER';
+  if (up === 'TIKTOK' || up === 'TIK_TOK') return 'TIK_TOK';
+  if (up === 'X' || up === 'TWITTER' || up === 'X_TWITTER') return 'X_TWITTER';
+  if (up.startsWith('FACEBOOK') || up === 'FB') return 'FACEBOOK';
+  if (up.startsWith('INSTAGRAM') || up === 'IG') return 'INSTAGRAM';
+  if (up.startsWith('THREADS')) return 'THREADS';
   return up;
 }
 
@@ -33,6 +36,12 @@ export async function getConnectedAccounts(accessToken) {
     const list = Array.isArray(data) ? data : (data?.accounts || data?.data || data?.items || []);
     if (!Array.isArray(list) || list.length === 0) return FALLBACK_ACCOUNTS;
 
+    console.log(
+      `🔍 [PostPulse] Raw accounts (${list.length}): ${list
+        .map((a) => `${a.platform || a.type || a.socialMediaPlatform || '?'}#${a.id}(${a.username || a.name || ''})`)
+        .join(', ')}`
+    );
+
     const mapped = [];
     for (const acc of list) {
       const type = normalizePlatformType(acc.platform || acc.type || acc.socialMediaPlatform);
@@ -41,7 +50,7 @@ export async function getConnectedAccounts(accessToken) {
       if (!id) continue;
       const entry = { id, type };
       if (type === 'FACEBOOK') {
-        entry.chatId = String(acc.pageId || acc.chatId || DEFAULT_FB_CHAT_ID);
+        entry.chatId = String(acc.pageId || acc.chatId || acc.externalId || DEFAULT_FB_CHAT_ID);
       }
       mapped.push(entry);
     }
