@@ -10,6 +10,7 @@ import { toSlug } from '../shared.mjs';
 import {
   findBestBackgroundImage,
   createImageRenderer,
+  renderPngToReelMp4,
   uploadImageToSupabase,
 } from './generate-image.mjs';
 import {
@@ -633,7 +634,8 @@ function writeGitHubStepSummary(stats) {
   if (stats.published.length > 0) {
     lines.push('### Published Articles', '');
     for (const p of stats.published) {
-      lines.push(`- **${p.enHeadline}** (PT: *${p.ptHeadline}*) — Writer: \`${p.provider}\` · Image: ${p.hasImage ? '🖼️ Yes' : '—'} · PostPulse: ${p.postedSocial ? '📱 Scheduled' : '—'}`);
+      const socialStr = p.postedChannels?.length ? `📱 ${p.postedChannels.join(', ')}` : '—';
+      lines.push(`- **${p.enHeadline}** (PT: *${p.ptHeadline}*) — Writer: \`${p.provider}\` · Image: ${p.hasImage ? '🖼️ Yes' : '—'} · Reel: ${p.hasReel ? '🎬 Yes' : '—'} · PostPulse: ${socialStr}`);
     }
     lines.push('');
   }
@@ -833,8 +835,9 @@ async function main() {
         const cleanEnHeadline = String(enEd.headline || analysis.headline || item.title).replace(/\*\*/g, '').trim();
         const cleanPtHeadline = String(ptEd.headline || cleanEnHeadline).replace(/\*\*/g, '').trim();
 
-        // 7. Generate 1200x1200 PNG post card & upload to Supabase Storage (bucket: img_post)
+        // 7. Generate 1080x1080 PNG card + 1080x1920 9:16 MP4 Reel & upload to Supabase Storage
         let imgPostUrl = '';
+        let reelVideoUrl = '';
         if (imageRenderer) {
           try {
             const bgUrl = await findBestBackgroundImage({
@@ -847,36 +850,74 @@ async function main() {
               .replace(/\*\*/g, '')
               .replace(/\.+$/, '')
               .trim();
+
+            // 7a. Square 1080x1080 PNG (X, Threads, Facebook, Supabase img_post)
             const { buffer, filename } = await imageRenderer.render({
               title: cardTitle,
               subline: 'bbnews.cc',
               imgUrl: bgUrl,
+              width: 1080,
+              height: 1080,
             });
             imgPostUrl = await uploadImageToSupabase({
               buffer,
               filename,
               supabaseUrl: SUPABASE_URL,
               serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+              contentType: 'image/png',
             });
-            console.log(`🖼️ [Image] Uploaded to Supabase Storage: ${filename}`);
+            console.log(`🖼️ [Image] Uploaded 1080x1080 PNG to Supabase Storage: ${filename}`);
+
+            // 7b. Vertical 1080x1920 9:16 MP4 Reel (Instagram Reels + TikTok)
+            if (postPulseToken) {
+              try {
+                const { buffer: vertPng } = await imageRenderer.render({
+                  title: cardTitle,
+                  subline: 'bbnews.cc',
+                  imgUrl: bgUrl,
+                  width: 1080,
+                  height: 1920,
+                });
+                const { buffer: mp4Buf, filename: mp4Name } = await renderPngToReelMp4({
+                  pngBuffer: vertPng,
+                  durationSec: 7,
+                });
+                reelVideoUrl = await uploadImageToSupabase({
+                  buffer: mp4Buf,
+                  filename: `reels/${mp4Name}`,
+                  supabaseUrl: SUPABASE_URL,
+                  serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
+                  contentType: 'video/mp4',
+                });
+                console.log(`🎬 [Reel] Uploaded 1080x1920 MP4 Reel to Supabase Storage: reels/${mp4Name}`);
+              } catch (reelErr) {
+                console.warn(`⚠️ [Reel] MP4 generation failed (Instagram/TikTok will use PNG): ${reelErr.message}`);
+              }
+            }
           } catch (imgErr) {
             console.warn(`⚠️ [Image] Failed for "${cleanEnHeadline}": ${imgErr.message}`);
           }
         }
 
-        // 8. Optionally publish to PostPulse (5 social channels) -> marks USE_LINK='yes' when succeeded
+        // 8. Optionally publish to PostPulse (Reels for IG/TikTok + PNG for X/Threads/FB)
         let postedSocial = false;
-        if (postPulseToken && imgPostUrl) {
+        let postedChannels = [];
+        if (postPulseToken && (imgPostUrl || reelVideoUrl)) {
           try {
-            await publishToPostPulse({
+            const ppRes = await publishToPostPulse({
               accessToken: postPulseToken,
               headline: cleanEnHeadline,
               summary: enEd.summary || enEd.hook || cleanEnHeadline,
               tag: enEd.tag || analysis.tags || '#Bitcoin #Crypto',
               imageUrl: imgPostUrl,
+              videoUrl: reelVideoUrl,
+              score,
+              supabaseUrl: SUPABASE_URL,
+              serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
             });
             postedSocial = true;
-            console.log(`📱 [PostPulse] Scheduled across 5 social accounts: ${cleanEnHeadline.slice(0, 60)}`);
+            postedChannels = ppRes.publishedChannels || [];
+            console.log(`📱 [PostPulse] Scheduled (${postedChannels.join(', ')}): ${cleanEnHeadline.slice(0, 60)}`);
           } catch (ppErr) {
             console.warn(`⚠️ [PostPulse] Failed for "${cleanEnHeadline}": ${ppErr.message}`);
           }
@@ -953,7 +994,9 @@ async function main() {
           ptHeadline: ptRaw.headline,
           provider: enResult.provider,
           hasImage: Boolean(imgPostUrl),
+          hasReel: Boolean(reelVideoUrl),
           postedSocial,
+          postedChannels,
         });
         // Register both the generated headline and raw RSS title so later candidates in this same run are deduplicated
         recentHeadlines48h.unshift(cleanEnHeadline, item.title);

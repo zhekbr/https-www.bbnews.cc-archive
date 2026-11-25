@@ -14,6 +14,83 @@ const FALLBACK_ACCOUNTS = [
 
 const SUPPORTED_PLATFORMS = new Set(['INSTAGRAM', 'X_TWITTER', 'TIK_TOK', 'FACEBOOK', 'THREADS']);
 const DEFAULT_FB_CHAT_ID = process.env.POSTPULSE_FACEBOOK_PAGE_ID || '1226176870572281';
+const TIKTOK_FALLBACK_MINUTES = parseInt(process.env.TIKTOK_FALLBACK_MINUTES || '75', 10); // 1h15
+const TIKTOK_MAX_POSTS_24H = parseInt(process.env.TIKTOK_MAX_POSTS_24H || '12', 10);
+const TIKTOK_PRIORITY_SCORE = parseInt(process.env.TIKTOK_PRIORITY_SCORE || '10', 10);
+
+async function loadTikTokPostTimestamps({ supabaseUrl, serviceRoleKey }) {
+  if (!supabaseUrl || !serviceRoleKey) return [];
+  try {
+    const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+    const res = await fetch(`${cleanUrl}/rest/v1/system_tokens?service=eq.tiktok_rate_limit&select=access_token`, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': serviceRoleKey,
+        'Authorization': `Bearer ${serviceRoleKey}`,
+      },
+    });
+    if (!res.ok) return [];
+    const rows = await res.json();
+    const raw = rows?.[0]?.access_token;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    return Array.isArray(parsed)
+      ? parsed.map(Number).filter((ts) => Number.isFinite(ts) && ts >= cutoff).sort((a, b) => a - b)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+async function saveTikTokPostTimestamps({ supabaseUrl, serviceRoleKey, timestamps }) {
+  if (!supabaseUrl || !serviceRoleKey) return;
+  try {
+    const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+    const pruned = timestamps.filter((ts) => ts >= cutoff).slice(-50);
+    await fetch(`${cleanUrl}/rest/v1/system_tokens?on_conflict=service`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': serviceRoleKey,
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        service: 'tiktok_rate_limit',
+        access_token: JSON.stringify(pruned),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (err) {
+    console.warn(`[PostPulse:TIK_TOK] Could not persist rate-limit state: ${err.message}`);
+  }
+}
+
+function evaluateTikTokEligibility({ score, timestamps }) {
+  const count24h = timestamps.length;
+  if (count24h >= TIKTOK_MAX_POSTS_24H) {
+    return { allowed: false, reason: `24h cap reached (${count24h}/${TIKTOK_MAX_POSTS_24H})` };
+  }
+  if (score >= TIKTOK_PRIORITY_SCORE) {
+    return { allowed: true, reason: `priority score=${score}/10 (${count24h}/${TIKTOK_MAX_POSTS_24H} in 24h)` };
+  }
+  const lastTs = timestamps.length > 0 ? timestamps[timestamps.length - 1] : 0;
+  const minsSinceLast = lastTs ? Math.floor((Date.now() - lastTs) / 60000) : Infinity;
+  if (minsSinceLast >= TIKTOK_FALLBACK_MINUTES) {
+    return {
+      allowed: true,
+      reason: `inactivity fallback (${lastTs ? `${minsSinceLast}m` : 'first post'} >= ${TIKTOK_FALLBACK_MINUTES}m; ${count24h}/${TIKTOK_MAX_POSTS_24H} in 24h)`,
+    };
+  }
+  const remaining = TIKTOK_FALLBACK_MINUTES - minsSinceLast;
+  return {
+    allowed: false,
+    reason: `score=${score} < ${TIKTOK_PRIORITY_SCORE}; last post ${minsSinceLast}m ago (fallback in ${remaining}m; ${count24h}/${TIKTOK_MAX_POSTS_24H} in 24h)`,
+  };
+}
 
 function normalizePlatformType(raw) {
   const up = String(raw || '').toUpperCase().replace(/[^A-Z0-9_]/g, '');
@@ -222,28 +299,61 @@ export async function publishToPostPulse({
   summary,
   tag,
   imageUrl,
+  videoUrl = '',
+  score = 8,
+  supabaseUrl = '',
+  serviceRoleKey = '',
   delayMinutes = 2,
 }) {
-  const mediaPath = await importPostPulseMedia({ accessToken, imageUrl });
+  const imageMediaPath = imageUrl ? await importPostPulseMedia({ accessToken, imageUrl }) : '';
+  let videoMediaPath = '';
+  if (videoUrl) {
+    try {
+      videoMediaPath = await importPostPulseMedia({ accessToken, imageUrl: videoUrl });
+      console.log(`🎬 [PostPulse] Imported 9:16 MP4 Reel media: ${videoMediaPath}`);
+    } catch (vidErr) {
+      console.warn(`⚠️ [PostPulse] Reel MP4 import failed (falling back to PNG): ${vidErr.message}`);
+    }
+  }
+
   const scheduledTime = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
   const cleanSummary = stripMarkdown(summary || headline || '');
   const cleanTag = stripMarkdown(tag || '');
   const baseText = `${cleanSummary}\n\n${cleanTag}`.trim();
 
   const accounts = await getConnectedAccounts(accessToken);
+  const tiktokTimestamps = await loadTikTokPostTimestamps({ supabaseUrl, serviceRoleKey });
   const results = [];
   const errors = [];
 
   for (const acc of accounts) {
     const platformSettings = { type: acc.type };
+    let attachmentPath = imageMediaPath;
+
     if (acc.type === 'INSTAGRAM') {
-      platformSettings.publicationType = 'FEED';
+      if (videoMediaPath) {
+        platformSettings.publicationType = 'REELS';
+        attachmentPath = videoMediaPath;
+      } else {
+        platformSettings.publicationType = 'FEED';
+      }
     } else if (acc.type === 'FACEBOOK') {
       platformSettings.publicationType = 'FEED';
     } else if (acc.type === 'TIK_TOK') {
-      platformSettings.title = String(headline || '').slice(0, 90);
+      const check = evaluateTikTokEligibility({ score, timestamps: tiktokTimestamps });
+      if (!check.allowed) {
+        console.log(`⏭️ [PostPulse:TIK_TOK] Skipped (${check.reason})`);
+        continue;
+      }
+      console.log(`🎯 [PostPulse:TIK_TOK] Allowed (${check.reason})`);
+      platformSettings.title = stripMarkdown(headline || '').slice(0, 90);
       platformSettings.privacyLevel = 'PUBLIC_TO_EVERYONE';
+      if (videoMediaPath) {
+        attachmentPath = videoMediaPath;
+      }
     }
+
+    if (!attachmentPath) continue;
 
     // X/Twitter 280-char safety
     const content = acc.type === 'X_TWITTER' && baseText.length > 275
@@ -252,7 +362,7 @@ export async function publishToPostPulse({
 
     const postObj = {
       content,
-      attachmentPaths: [mediaPath],
+      attachmentPaths: [attachmentPath],
     };
     if (acc.chatId) {
       postObj.chatId = acc.chatId;
@@ -280,7 +390,14 @@ export async function publishToPostPulse({
 
     const respText = await res.text();
     if (res.ok) {
-      results.push(acc.type);
+      const label = acc.type === 'INSTAGRAM' && platformSettings.publicationType === 'REELS'
+        ? 'INSTAGRAM(REELS)'
+        : acc.type;
+      results.push(label);
+      if (acc.type === 'TIK_TOK') {
+        tiktokTimestamps.push(Date.now());
+        await saveTikTokPostTimestamps({ supabaseUrl, serviceRoleKey, timestamps: tiktokTimestamps });
+      }
     } else {
       console.warn(`⚠️ [PostPulse:${acc.type}] HTTP ${res.status}: ${respText.slice(0, 200)}`);
       errors.push(`${acc.type}: ${respText.slice(0, 120)}`);
@@ -291,5 +408,11 @@ export async function publishToPostPulse({
     throw new Error(`All PostPulse channels failed: ${errors.join(' | ')}`);
   }
 
-  return { mediaPath, scheduledTime, publishedChannels: results, failedChannels: errors };
+  return {
+    mediaPath: imageMediaPath,
+    videoMediaPath,
+    scheduledTime,
+    publishedChannels: results,
+    failedChannels: errors,
+  };
 }

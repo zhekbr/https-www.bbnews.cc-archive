@@ -7,6 +7,9 @@
 
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFile } from 'child_process';
 import { buildImageHtml } from './image-template.mjs';
 
 const STOP_WORDS = new Set([
@@ -209,19 +212,20 @@ export async function createImageRenderer() {
   });
 
   return {
-    async render({ title, subline = 'bbnews.cc', imgUrl }) {
+    async render({ title, subline = 'bbnews.cc', imgUrl, width = 1080, height = 1080 }) {
       const page = await browser.newPage();
       try {
-        await page.setViewport({ width: 1080, height: 1080, deviceScaleFactor: 1 });
+        await page.setViewport({ width, height, deviceScaleFactor: 1 });
         const cleanTitle = String(title || '').replace(/\*\*/g, '').trim();
-        const html = buildImageHtml({ title: cleanTitle, subline, img_url: imgUrl });
+        const html = buildImageHtml({ title: cleanTitle, subline, img_url: imgUrl, width, height });
         await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
         await page.waitForFunction(() => window.__BBN_READY__ === true, { timeout: 10000 });
         const canvasEl = await page.$('.canvas');
         if (!canvasEl) throw new Error('Element .canvas not found');
         const buffer = await canvasEl.screenshot({ type: 'png' });
         const hash = crypto.randomBytes(8).toString('hex');
-        const filename = `bbn-${Date.now()}-${hash}.png`;
+        const suffix = height > width ? 'reel' : 'post';
+        const filename = `bbn-${suffix}-${Date.now()}-${hash}.png`;
         return { buffer, filename };
       } finally {
         await page.close();
@@ -233,16 +237,68 @@ export async function createImageRenderer() {
   };
 }
 
-export async function uploadImageToSupabase({ buffer, filename, supabaseUrl, serviceRoleKey, bucket = 'img_post' }) {
+export async function renderPngToReelMp4({ pngBuffer, durationSec = 7 }) {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bbn-reel-'));
+  const inPng = path.join(tmpDir, 'frame.png');
+  const outMp4 = path.join(tmpDir, 'reel.mp4');
+
+  try {
+    fs.writeFileSync(inPng, pngBuffer);
+    const fps = 30;
+    const totalFrames = durationSec * fps;
+
+    // Gentle Ken Burns zoom-in on 1080x1920 vertical canvas + silent AAC audio (required by IG Reels)
+    const args = [
+      '-y',
+      '-loop', '1',
+      '-i', inPng,
+      '-f', 'lavfi',
+      '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+      '-vf', `scale=1160:2062:force_original_aspect_ratio=increase,crop=1160:2062,zoompan=z='min(zoom+0.0004,1.07)':d=${totalFrames}:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1080x1920:fps=${fps},format=yuv420p`,
+      '-t', String(durationSec),
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '22',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-shortest',
+      '-movflags', '+faststart',
+      outMp4,
+    ];
+
+    await new Promise((resolve, reject) => {
+      execFile('ffmpeg', args, { timeout: 60000, maxBuffer: 5 * 1024 * 1024 }, (err, _stdout, stderr) => {
+        if (err) return reject(new Error(`ffmpeg failed: ${err.message} ${String(stderr || '').slice(-200)}`));
+        resolve();
+      });
+    });
+
+    const buffer = fs.readFileSync(outMp4);
+    const hash = crypto.randomBytes(8).toString('hex');
+    const filename = `bbn-reel-${Date.now()}-${hash}.mp4`;
+    return { buffer, filename };
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+export async function uploadImageToSupabase({
+  buffer,
+  filename,
+  supabaseUrl,
+  serviceRoleKey,
+  bucket = 'img_post',
+  contentType = 'image/png',
+}) {
   const cleanUrl = supabaseUrl.replace(/\/+$/, '');
   const uploadUrl = `${cleanUrl}/storage/v1/object/${bucket}/${filename}`;
   const res = await fetch(uploadUrl, {
     method: 'POST',
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(30000),
     headers: {
       'apikey': serviceRoleKey,
       'Authorization': `Bearer ${serviceRoleKey}`,
-      'Content-Type': 'image/png',
+      'Content-Type': contentType,
     },
     body: buffer,
   });

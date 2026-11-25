@@ -1,9 +1,9 @@
 // ============================================================
 // BBN Image Generator — scripts/image-template.mjs
-// Exact ESM port of G:\bbn\bbn-post\template.js (1200x1200)
+// Supports 1080x1080 (Feed/X/Threads/FB) and 1080x1920 (Reels/TikTok 9:16)
 // ============================================================
 
-export function buildImageHtml({ title, subline, img_url }) {
+export function buildImageHtml({ title, subline, img_url, width = 1080, height = 1080 }) {
   const esc = (s) =>
     String(s ?? '')
       .replace(/&/g, '&amp;')
@@ -16,11 +16,20 @@ export function buildImageHtml({ title, subline, img_url }) {
     ? String(img_url).trim()
     : '';
 
+  const isVertical = height > width;
+  const contentPad = isVertical ? '180px 110px 330px 70px' : '64px 60px';
+  const badgeTop = isVertical ? '150px' : '48px';
+  const sideBarBottom = isVertical ? '330px' : '64px';
+  const watermarkBottom = isVertical ? '338px' : '72px';
+  const titleBoxHeight = isVertical ? '640px' : '450px';
+  const maxFont = isVertical ? 64 : 48;
+  const minFont = isVertical ? 32 : 24;
+
   return /* html */ `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=1080" />
+  <meta name="viewport" content="width=${width}" />
   <title>BBN Post Generator</title>
 
   <!-- Google Font: Bebas Neue (display) + Inter (corpo) -->
@@ -35,16 +44,16 @@ export function buildImageHtml({ title, subline, img_url }) {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      width: 1080px;
-      height: 1080px;
+      width: ${width}px;
+      height: ${height}px;
       overflow: hidden;
       background: #000;
     }
 
     .canvas {
       position: relative;
-      width: 1080px;
-      height: 1080px;
+      width: ${width}px;
+      height: ${height}px;
       overflow: hidden;
       font-family: 'Inter', sans-serif;
       background: #111;
@@ -65,9 +74,9 @@ export function buildImageHtml({ title, subline, img_url }) {
       inset: 0;
       background: linear-gradient(
         to top,
-        rgba(0, 0, 0, 0.92) 0%,
-        rgba(0, 0, 0, 0.70) 45%,
-        rgba(0, 0, 0, 0.20) 100%
+        rgba(0, 0, 0, 0.94) 0%,
+        rgba(0, 0, 0, 0.72) 48%,
+        rgba(0, 0, 0, 0.25) 100%
       );
     }
 
@@ -79,12 +88,12 @@ export function buildImageHtml({ title, subline, img_url }) {
       justify-content: flex-end;
       max-width: none !important;
       align-items: flex-end;
-      padding: 64px 60px;
+      padding: ${contentPad};
     }
 
     .badge {
       position: absolute;
-      top: 48px;
+      top: ${badgeTop};
       left: 60px;
       display: flex;
       align-items: center;
@@ -126,8 +135,8 @@ export function buildImageHtml({ title, subline, img_url }) {
     }
 
     .title-box {
-      height: 450px;
-      width: 90%;
+      height: ${titleBoxHeight};
+      width: 92%;
       display: flex;
       align-items: flex-end;
       justify-content: flex-end;
@@ -140,16 +149,16 @@ export function buildImageHtml({ title, subline, img_url }) {
 
     .title-text {
       font-family: 'Bebas Neue', sans-serif;
-      font-size: 70px;
-      line-height: 1.2;
+      font-size: ${maxFont}px;
+      line-height: 1.18;
       color: #ffffff;
-      letter-spacing: -1px;
+      letter-spacing: -0.5px;
       text-transform: uppercase;
       text-align: right;
       text-wrap: balance;
-      text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.7);
+      text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.8);
       padding-bottom: 15px;
-      padding-right: 15px;
+      padding-right: 12px;
       word-break: break-word;
       overflow-wrap: break-word;
       hyphens: auto;
@@ -180,7 +189,7 @@ export function buildImageHtml({ title, subline, img_url }) {
     .side-bar {
       position: absolute;
       left: 60px;
-      bottom: 64px;
+      bottom: ${sideBarBottom};
       width: 5px;
       height: 80px;
       background: #F7931A;
@@ -189,12 +198,12 @@ export function buildImageHtml({ title, subline, img_url }) {
 
     .watermark {
       position: absolute;
-      bottom: 72px;
+      bottom: ${watermarkBottom};
       left: 82px;
       font-family: 'Inter', sans-serif;
       font-size: 14px;
       font-weight: 700;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.55);
       letter-spacing: 2px;
       text-transform: uppercase;
     }
@@ -232,8 +241,8 @@ export function buildImageHtml({ title, subline, img_url }) {
       const box  = document.getElementById('titleBox');
       const text = document.getElementById('titleText');
 
-      const MAX_SIZE = 48;
-      const MIN_SIZE = 24;
+      const MAX_SIZE = ${maxFont};
+      const MIN_SIZE = ${minFont};
 
       let currentSize = MAX_SIZE;
       text.style.fontSize = currentSize + 'px';
@@ -249,7 +258,7 @@ export function buildImageHtml({ title, subline, img_url }) {
 
       const sideBar = document.querySelector('.side-bar');
       if (sideBar) {
-        sideBar.style.height = Math.min(box.clientHeight * 0.4, 200) + 'px';
+        sideBar.style.height = Math.min(box.clientHeight * 0.35, 200) + 'px';
       }
 
       window.__BBN_READY__ = true;
