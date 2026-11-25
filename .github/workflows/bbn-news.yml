@@ -1,5 +1,4 @@
 name: BBN Breaking News Pipeline
-
 on:
   workflow_dispatch:
     inputs:
@@ -11,28 +10,24 @@ on:
         options:
           - 'false'
           - 'true'
-
 concurrency:
   group: bbn-news-pipeline
   cancel-in-progress: false
-
 jobs:
   fetch-and-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-
-      - name: Install puppeteer-core
-        run: npm install --no-save puppeteer-core@^22.15.0
-
+      - name: Install ffmpeg and puppeteer-core
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          npm install --no-save puppeteer-core@^22.15.0
       - name: Run BBN Breaking News Pipeline
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -43,8 +38,3 @@ jobs:
           OPENROUTER_MODEL: google/gemma-4-31b-it:free
           JINA_API_KEY: ${{ secrets.JINA_API_KEY }}
           PEXELS_API_KEY: ${{ secrets.PEXELS_API_KEY }}
-          POSTPULSE_CLIENT_ID: ${{ secrets.POSTPULSE_CLIENT_ID }}
-          POSTPULSE_CLIENT_SECRET: ${{ secrets.POSTPULSE_CLIENT_SECRET }}
-          POSTPULSE_REFRESH_TOKEN: ${{ secrets.POSTPULSE_REFRESH_TOKEN }}
-          DRY_RUN: ${{ inputs.dry_run || 'false' }}
-        run: node scripts/bbn-pipeline.mjs
