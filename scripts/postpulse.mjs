@@ -154,6 +154,16 @@ export async function importPostPulseMedia({ accessToken, imageUrl }) {
   throw new Error(`PostPulse media import #${importId} timed out waiting for READY state`);
 }
 
+function stripMarkdown(text) {
+  return String(text || '')
+    .replace(/\*\*(.+?)\*\*/g, '$1')
+    .replace(/__(.+?)__/g, '$1')
+    .replace(/\*(.+?)\*/g, '$1')
+    .replace(/`(.+?)`/g, '$1')
+    .replace(/\*\*/g, '')
+    .trim();
+}
+
 export async function publishToPostPulse({
   accessToken,
   headline,
@@ -164,7 +174,9 @@ export async function publishToPostPulse({
 }) {
   const mediaPath = await importPostPulseMedia({ accessToken, imageUrl });
   const scheduledTime = new Date(Date.now() + delayMinutes * 60 * 1000).toISOString();
-  const baseText = `${String(summary || headline || '').trim()}\n\n${String(tag || '').trim()}`.trim();
+  const cleanSummary = stripMarkdown(summary || headline || '');
+  const cleanTag = stripMarkdown(tag || '');
+  const baseText = `${cleanSummary}\n\n${cleanTag}`.trim();
 
   const results = [];
   const errors = [];
