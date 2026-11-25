@@ -20,7 +20,7 @@ export function buildImageHtml({ title, subline, img_url }) {
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=1200" />
+  <meta name="viewport" content="width=1080" />
   <title>BBN Post Generator</title>
 
   <!-- Google Font: Bebas Neue (display) + Inter (corpo) -->
@@ -35,16 +35,16 @@ export function buildImageHtml({ title, subline, img_url }) {
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      width: 1200px;
-      height: 1200px;
+      width: 1080px;
+      height: 1080px;
       overflow: hidden;
       background: #000;
     }
 
     .canvas {
       position: relative;
-      width: 1200px;
-      height: 1200px;
+      width: 1080px;
+      height: 1080px;
       overflow: hidden;
       font-family: 'Inter', sans-serif;
       background: #111;

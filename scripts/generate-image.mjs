@@ -204,7 +204,7 @@ export async function createImageRenderer() {
       '--disable-dev-shm-usage',
       '--disable-accelerated-2d-canvas',
       '--disable-gpu',
-      '--window-size=1200,1200',
+      '--window-size=1080,1080',
     ],
   });
 
@@ -212,7 +212,7 @@ export async function createImageRenderer() {
     async render({ title, subline = 'bbnews.cc', imgUrl }) {
       const page = await browser.newPage();
       try {
-        await page.setViewport({ width: 1200, height: 1200, deviceScaleFactor: 1 });
+        await page.setViewport({ width: 1080, height: 1080, deviceScaleFactor: 1 });
         const cleanTitle = String(title || '').replace(/\*\*/g, '').trim();
         const html = buildImageHtml({ title: cleanTitle, subline, img_url: imgUrl });
         await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });

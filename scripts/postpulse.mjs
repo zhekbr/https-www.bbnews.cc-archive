@@ -4,13 +4,56 @@
 // schedules posts across Instagram, X, TikTok, Facebook & Threads.
 // ============================================================
 
-const DEFAULT_ACCOUNTS = [
+const FALLBACK_ACCOUNTS = [
   { id: 1757, type: 'INSTAGRAM' },
   { id: 1756, type: 'X_TWITTER' },
   { id: 1758, type: 'TIK_TOK' },
   { id: 1759, type: 'FACEBOOK', chatId: '1226176870572281' },
   { id: 1760, type: 'THREADS' },
 ];
+
+const SUPPORTED_PLATFORMS = new Set(['INSTAGRAM', 'X_TWITTER', 'TIK_TOK', 'FACEBOOK', 'THREADS']);
+const DEFAULT_FB_CHAT_ID = process.env.POSTPULSE_FACEBOOK_PAGE_ID || '1226176870572281';
+
+function normalizePlatformType(raw) {
+  const up = String(raw || '').toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  if (up === 'TIKTOK') return 'TIK_TOK';
+  if (up === 'X' || up === 'TWITTER') return 'X_TWITTER';
+  return up;
+}
+
+export async function getConnectedAccounts(accessToken) {
+  try {
+    const res = await fetch('https://api.post-pulse.com/v1/accounts', {
+      signal: AbortSignal.timeout(15000),
+      headers: { 'Authorization': `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return FALLBACK_ACCOUNTS;
+    const data = await res.json();
+    const list = Array.isArray(data) ? data : (data?.accounts || data?.data || data?.items || []);
+    if (!Array.isArray(list) || list.length === 0) return FALLBACK_ACCOUNTS;
+
+    const mapped = [];
+    for (const acc of list) {
+      const type = normalizePlatformType(acc.platform || acc.type || acc.socialMediaPlatform);
+      if (!SUPPORTED_PLATFORMS.has(type)) continue;
+      const id = Number(acc.id);
+      if (!id) continue;
+      const entry = { id, type };
+      if (type === 'FACEBOOK') {
+        entry.chatId = String(acc.pageId || acc.chatId || DEFAULT_FB_CHAT_ID);
+      }
+      mapped.push(entry);
+    }
+    if (mapped.length > 0) {
+      console.log(`🔗 [PostPulse] Active accounts discovered: ${mapped.map((a) => `${a.type}#${a.id}`).join(', ')}`);
+      return mapped;
+    }
+  } catch (err) {
+    console.warn(`[PostPulse] Could not list connected accounts, using defaults: ${err.message}`);
+  }
+  return FALLBACK_ACCOUNTS;
+}
 
 export async function getPostPulseAccessToken({
   clientId,
@@ -178,10 +221,11 @@ export async function publishToPostPulse({
   const cleanTag = stripMarkdown(tag || '');
   const baseText = `${cleanSummary}\n\n${cleanTag}`.trim();
 
+  const accounts = await getConnectedAccounts(accessToken);
   const results = [];
   const errors = [];
 
-  for (const acc of DEFAULT_ACCOUNTS) {
+  for (const acc of accounts) {
     const platformSettings = { type: acc.type };
     if (acc.type === 'INSTAGRAM') {
       platformSettings.publicationType = 'FEED';
