@@ -60,6 +60,14 @@ const OPENROUTER_MODELS = (
       ]
 ).filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
+// Ultra-cheap high-quality paid OpenRouter models (used at most 1 article every 3 hours)
+const OPENROUTER_PAID_MODELS = [
+  'deepseek/deepseek-v3.2',       // $0.26/M in, $0.38/M out — elite long-form writing
+  'google/gemini-2.5-flash-lite', // $0.10/M in, $0.40/M out — fast & fluent EN/PT
+  'openai/gpt-4o-mini',           // $0.15/M in, $0.60/M out — rock-solid fallback
+];
+const OPENROUTER_PAID_INTERVAL_MINUTES = parseInt(process.env.OPENROUTER_PAID_INTERVAL_MINUTES || '180', 10); // 3 hours
+
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const JINA_API_KEY = process.env.JINA_API_KEY || '';
@@ -417,13 +425,13 @@ function extractJsonObject(raw) {
   return JSON.parse(cleaned);
 }
 
-async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096) {
+async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelList = OPENROUTER_MODELS) {
   if (OPENROUTER_KEYS.length === 0) {
     throw new Error('No OpenRouter API keys configured');
   }
 
   let lastError = null;
-  for (const model of OPENROUTER_MODELS) {
+  for (const model of modelList) {
     for (let kAttempt = 0; kAttempt < OPENROUTER_KEYS.length; kAttempt++) {
       const keyIdx = openRouterKeyCursor % OPENROUTER_KEYS.length;
       openRouterKeyCursor = (openRouterKeyCursor + 1) % OPENROUTER_KEYS.length;
@@ -432,7 +440,7 @@ async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096) {
       try {
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
-          signal: AbortSignal.timeout(25000),
+          signal: AbortSignal.timeout(30000),
           headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
@@ -482,15 +490,68 @@ async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096) {
   throw lastError || new Error('All OpenRouter models/keys failed');
 }
 
-// Writer: prefers OpenRouter :free -> falls back to Groq
-async function callOpenRouterOrGroqJSON(prompt) {
+// Track last paid OpenRouter article timestamp in private Supabase `system_tokens`
+async function getLastPaidOpenRouterTs() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return 0;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/system_tokens?service=eq.openrouter_paid_limit&select=access_token`, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    });
+    if (!res.ok) return 0;
+    const rows = await res.json();
+    const ts = Number(rows?.[0]?.access_token || 0);
+    return Number.isFinite(ts) ? ts : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function saveLastPaidOpenRouterTs(ts) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/system_tokens?on_conflict=service`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        service: 'openrouter_paid_limit',
+        access_token: String(ts),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (err) {
+    console.warn(`[OpenRouter] Could not save paid cooldown timestamp: ${err.message}`);
+  }
+}
+
+// Writer:
+// - If allowPaidOpenRouter=true (max 1 article every 3h): uses cheap high-quality paid OpenRouter models first
+// - Otherwise: uses OpenRouter :free -> Groq (and never spends paid credits)
+async function callOpenRouterOrGroqJSON(prompt, { allowPaidOpenRouter = false } = {}) {
   const systemPrompt = 'You are a senior financial and geopolitical journalist. Return strictly one valid raw JSON object with no markdown fences or extra text.';
+
+  if (OPENROUTER_KEYS.length > 0 && allowPaidOpenRouter) {
+    try {
+      return await callOpenRouterJSON(prompt, systemPrompt, 4096, OPENROUTER_PAID_MODELS);
+    } catch (paidErr) {
+      console.warn(`↩️ [Writer] Paid OpenRouter failed (${paidErr.message.slice(0, 90)}); trying free models...`);
+    }
+  }
 
   if (OPENROUTER_KEYS.length > 0) {
     try {
-      return await callOpenRouterJSON(prompt, systemPrompt, 4096);
+      return await callOpenRouterJSON(prompt, systemPrompt, 4096, OPENROUTER_MODELS);
     } catch {
-      console.warn('↩️ [Writer] OpenRouter unavailable/rate-limited; falling back to Groq...');
+      console.warn('↩️ [Writer] Free OpenRouter unavailable/rate-limited; falling back to Groq...');
     }
   }
 
@@ -498,7 +559,7 @@ async function callOpenRouterOrGroqJSON(prompt) {
   return { parsed, provider: `Groq (${GROQ_MODEL})` };
 }
 
-// Analyzer: prefers Groq (fast) -> automatically falls back to OpenRouter :free if Groq TPD is exhausted
+// Analyzer: prefers Groq (fast) -> OpenRouter :free -> emergency ultra-cheap paid fallback (gemini-2.5-flash-lite)
 async function callAnalyzerJSON(prompt) {
   const systemPrompt = 'You return strictly one valid raw JSON object only.';
   try {
@@ -506,8 +567,14 @@ async function callAnalyzerJSON(prompt) {
   } catch (groqErr) {
     if (OPENROUTER_KEYS.length > 0) {
       console.warn(`↩️ [Analyzer] Groq exhausted (${groqErr.message.slice(0, 90)}); falling back to OpenRouter...`);
-      const res = await callOpenRouterJSON(prompt, systemPrompt, 1024);
-      return res.parsed;
+      try {
+        const res = await callOpenRouterJSON(prompt, systemPrompt, 1024, OPENROUTER_MODELS);
+        return res.parsed;
+      } catch {
+        console.warn('↩️ [Analyzer] OpenRouter :free busy; using emergency ultra-cheap model (gemini-2.5-flash-lite)...');
+        const res = await callOpenRouterJSON(prompt, systemPrompt, 1024, ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini']);
+        return res.parsed;
+      }
     }
     throw groqErr;
   }
@@ -851,6 +918,7 @@ async function main() {
 
   // 4. Analyze urgency with Groq (rotating keys) & generate post images
   let publishedCount = 0;
+  let lastPaidOpenRouterTs = await getLastPaidOpenRouterTs();
   let imageRenderer = await createImageRenderer();
   if (imageRenderer) {
     console.log('🎨 [Image] Headless Chrome renderer ready (Wikimedia Commons -> Pexels -> 1200x1200 BBN template)');
@@ -915,10 +983,21 @@ async function main() {
       // 5. Fetch full text via Jina AI
       const fullText = await fetchFullArticleText(item.link, item.contentSnippet);
 
-      // 6. Generate long-form EN and PT editorial versions (OpenRouter :free -> Groq fallback)
+      // 6. Generate long-form EN and PT editorial versions
+      // Paid OpenRouter (deepseek-v3.2 / gemini-2.5-flash-lite / gpt-4o-mini) allowed at most 1 article every 3h
+      const minsSincePaid = lastPaidOpenRouterTs ? Math.floor((Date.now() - lastPaidOpenRouterTs) / 60000) : Infinity;
+      const allowPaidOpenRouter = OPENROUTER_KEYS.length > 0 && minsSincePaid >= OPENROUTER_PAID_INTERVAL_MINUTES;
+      if (allowPaidOpenRouter) {
+        console.log(`💎 [Writer] Paid OpenRouter slot unlocked (${lastPaidOpenRouterTs ? `${minsSincePaid}m` : 'first run'} >= ${OPENROUTER_PAID_INTERVAL_MINUTES}m)`);
+      }
+
       try {
-        const enResult = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'en'));
-        const ptResult = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'pt'));
+        const enResult = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'en'), { allowPaidOpenRouter });
+        const ptResult = await callOpenRouterOrGroqJSON(buildEditorialPrompt(item, fullText, 'pt'), { allowPaidOpenRouter });
+        if (allowPaidOpenRouter && (enResult.provider.includes('deepseek') || enResult.provider.includes('gemini-2.5-flash-lite') || enResult.provider.includes('gpt-4o-mini'))) {
+          lastPaidOpenRouterTs = Date.now();
+          await saveLastPaidOpenRouterTs(lastPaidOpenRouterTs);
+        }
         const enEd = enResult.parsed;
         const ptEd = ptResult.parsed;
 
