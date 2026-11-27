@@ -25,11 +25,39 @@ const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
 const MAX_AI_SIMILARITY = parseInt(process.env.BBN_MAX_SIMILARITY || '60', 10);
 const MAX_LOCAL_SIMILARITY = parseInt(process.env.BBN_MAX_LOCAL_SIMILARITY || '50', 10);
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-const OPENROUTER_API_KEY = (process.env.OPENROUTER_API_KEY || '').trim();
+
+function loadOpenRouterKeys() {
+  const keys = [];
+  for (const envVal of [process.env.OPENROUTER_API_KEYS, process.env.OPENROUTER_API_KEY]) {
+    if (!envVal) continue;
+    keys.push(
+      ...envVal
+        .split(/[\s,;]+/)
+        .map((k) => k.trim())
+        .filter((k) => /^sk-or-/i.test(k))
+    );
+  }
+  return [...new Set(keys)];
+}
+
+const OPENROUTER_KEYS = loadOpenRouterKeys();
+let openRouterKeyCursor = 0;
+
 const OPENROUTER_MODELS = (
   process.env.OPENROUTER_MODEL
-    ? [process.env.OPENROUTER_MODEL.trim(), 'google/gemma-4-31b-it:free', 'nvidia/nemotron-3-ultra-550b-a55b:free']
-    : ['google/gemma-4-31b-it:free', 'nvidia/nemotron-3-ultra-550b-a55b:free']
+    ? [
+        process.env.OPENROUTER_MODEL.trim(),
+        'google/gemma-4-26b-a4b-it:free',
+        'google/gemma-4-31b-it:free',
+        'nvidia/nemotron-3.5-lightning:free',
+        'openrouter/free',
+      ]
+    : [
+        'google/gemma-4-26b-a4b-it:free',
+        'google/gemma-4-31b-it:free',
+        'nvidia/nemotron-3.5-lightning:free',
+        'openrouter/free',
+      ]
 ).filter((m, idx, arr) => m && arr.indexOf(m) === idx);
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
@@ -63,6 +91,7 @@ function loadGroqKeys() {
 
 const GROQ_KEYS = loadGroqKeys();
 let groqKeyCursor = 0;
+const exhaustedGroqKeys = new Set();
 
 // ── 20 RSS Feeds (from bbn.json) ────────────────────────────
 const RSS_FEEDS = [
@@ -296,24 +325,34 @@ function filterAndRank(items) {
   return candidates.sort((a, b) => b.preScore - a.preScore);
 }
 
-// ── 6-Key Rotating Groq Client ──────────────────────────────
+// ── Multi-Key Rotating Groq Client (skips daily-exhausted/invalid keys) ──
 async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid raw JSON objects only.') {
-  if (GROQ_KEYS.length === 0) {
-    throw new Error('No Groq API keys configured in GROQ_API_KEYS');
+  const availableIndices = GROQ_KEYS.map((_, i) => i).filter((i) => !exhaustedGroqKeys.has(i));
+  if (availableIndices.length === 0) {
+    throw new Error('All Groq API keys are exhausted or invalid for this run');
   }
 
-  const totalAttempts = GROQ_KEYS.length * 2;
   let lastError = null;
+  const maxAttempts = availableIndices.length;
 
-  for (let attempt = 0; attempt < totalAttempts; attempt++) {
-    const keyIdx = groqKeyCursor % GROQ_KEYS.length;
-    groqKeyCursor = (groqKeyCursor + 1) % GROQ_KEYS.length;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // Pick next non-exhausted key in round-robin order
+    let keyIdx = -1;
+    for (let step = 0; step < GROQ_KEYS.length; step++) {
+      const candidate = (groqKeyCursor + step) % GROQ_KEYS.length;
+      if (!exhaustedGroqKeys.has(candidate)) {
+        keyIdx = candidate;
+        groqKeyCursor = (candidate + 1) % GROQ_KEYS.length;
+        break;
+      }
+    }
+    if (keyIdx === -1) break;
+
     const apiKey = GROQ_KEYS[keyIdx];
-
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(35000),
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
@@ -329,13 +368,23 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
         }),
       });
 
+      if (res.status === 401) {
+        const body = await res.text();
+        exhaustedGroqKeys.add(keyIdx);
+        console.warn(`[Groq] Key #${keyIdx + 1} invalid (HTTP 401); disabling for rest of run.`);
+        lastError = new Error(`Groq HTTP 401: ${body.slice(0, 160)}`);
+        continue;
+      }
+
       if (res.status === 429 || res.status >= 500) {
         const body = await res.text();
-        console.warn(`[Groq] Key #${keyIdx + 1} returned HTTP ${res.status}; rotating to next key...`);
-        lastError = new Error(`Groq HTTP ${res.status}: ${body.slice(0, 200)}`);
-        if (attempt >= GROQ_KEYS.length - 1) {
-          await new Promise((r) => setTimeout(r, 2000));
+        if (/tokens per day|TPD/i.test(body)) {
+          exhaustedGroqKeys.add(keyIdx);
+          console.warn(`[Groq] Key #${keyIdx + 1} hit daily TPD limit; disabling for rest of run.`);
+        } else {
+          console.warn(`[Groq] Key #${keyIdx + 1} returned HTTP ${res.status}; rotating to next key...`);
         }
+        lastError = new Error(`Groq HTTP ${res.status}: ${body.slice(0, 200)}`);
         continue;
       }
 
@@ -345,9 +394,8 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
       }
 
       const data = await res.json();
-      let raw = data?.choices?.[0]?.message?.content || '';
-      raw = raw.replace(/^```json\s*/i, '').replace(/\s*```$/i, '').trim();
-      return JSON.parse(raw);
+      const raw = data?.choices?.[0]?.message?.content || '';
+      return extractJsonObject(raw);
     } catch (err) {
       lastError = err;
       console.warn(`[Groq] Attempt ${attempt + 1} (Key #${keyIdx + 1}) error: ${err.message}`);
@@ -357,7 +405,7 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
   throw lastError || new Error('All Groq API keys failed');
 }
 
-// ── OpenRouter Free Long-Form Writer (with automatic Groq fallback) ──
+// ── Multi-Key OpenRouter Free Client ────────────────────────
 function extractJsonObject(raw) {
   let cleaned = String(raw || '').trim();
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
@@ -369,17 +417,24 @@ function extractJsonObject(raw) {
   return JSON.parse(cleaned);
 }
 
-async function callOpenRouterOrGroqJSON(prompt) {
-  const systemPrompt = 'You are a senior financial and geopolitical journalist. Return strictly one valid raw JSON object with no markdown fences or extra text.';
+async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096) {
+  if (OPENROUTER_KEYS.length === 0) {
+    throw new Error('No OpenRouter API keys configured');
+  }
 
-  if (OPENROUTER_API_KEY) {
-    for (const model of OPENROUTER_MODELS) {
+  let lastError = null;
+  for (const model of OPENROUTER_MODELS) {
+    for (let kAttempt = 0; kAttempt < OPENROUTER_KEYS.length; kAttempt++) {
+      const keyIdx = openRouterKeyCursor % OPENROUTER_KEYS.length;
+      openRouterKeyCursor = (openRouterKeyCursor + 1) % OPENROUTER_KEYS.length;
+      const apiKey = OPENROUTER_KEYS[keyIdx];
+
       try {
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
           signal: AbortSignal.timeout(25000),
           headers: {
-            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
             'HTTP-Referer': 'https://bbnews.cc',
             'X-Title': 'BBN - Bitcoin Brasil News',
@@ -387,7 +442,7 @@ async function callOpenRouterOrGroqJSON(prompt) {
           body: JSON.stringify({
             model,
             temperature: 0.4,
-            max_tokens: 4096,
+            max_tokens: maxTokens,
             response_format: { type: 'json_object' },
             messages: [
               { role: 'system', content: systemPrompt },
@@ -398,29 +453,64 @@ async function callOpenRouterOrGroqJSON(prompt) {
 
         if (res.status === 429 || res.status >= 500) {
           const body = await res.text();
-          console.warn(`[OpenRouter] ${model} returned HTTP ${res.status} (${body.slice(0, 140)}); trying next model...`);
+          console.warn(`[OpenRouter] ${model} (Key #${keyIdx + 1}) HTTP ${res.status} (${body.slice(0, 120)}); trying next...`);
+          lastError = new Error(`OpenRouter HTTP ${res.status}: ${body.slice(0, 140)}`);
+          // If upstream model itself is rate-limited, jump straight to next model
+          if (/upstream|temporarily rate-limited/i.test(body)) break;
           continue;
         }
         if (!res.ok) {
           const body = await res.text();
-          console.warn(`[OpenRouter] ${model} HTTP ${res.status}: ${body.slice(0, 180)}`);
-          continue;
+          console.warn(`[OpenRouter] ${model} (Key #${keyIdx + 1}) HTTP ${res.status}: ${body.slice(0, 160)}`);
+          lastError = new Error(`OpenRouter HTTP ${res.status}`);
+          break;
         }
 
         const data = await res.json();
         const content = data?.choices?.[0]?.message?.content || '';
         const parsed = extractJsonObject(content);
-        console.log(`✍️ [OpenRouter] Article generated with ${model}`);
+        console.log(`✍️ [OpenRouter] Response generated with ${model} (Key #${keyIdx + 1})`);
         return { parsed, provider: `OpenRouter (${model})` };
       } catch (err) {
-        console.warn(`[OpenRouter] ${model} failed: ${err.message}`);
+        lastError = err;
+        console.warn(`[OpenRouter] ${model} (Key #${keyIdx + 1}) failed: ${err.message}`);
+        break;
       }
     }
-    console.warn('↩️ [Writer] OpenRouter unavailable/rate-limited; falling back to Groq...');
+  }
+
+  throw lastError || new Error('All OpenRouter models/keys failed');
+}
+
+// Writer: prefers OpenRouter :free -> falls back to Groq
+async function callOpenRouterOrGroqJSON(prompt) {
+  const systemPrompt = 'You are a senior financial and geopolitical journalist. Return strictly one valid raw JSON object with no markdown fences or extra text.';
+
+  if (OPENROUTER_KEYS.length > 0) {
+    try {
+      return await callOpenRouterJSON(prompt, systemPrompt, 4096);
+    } catch {
+      console.warn('↩️ [Writer] OpenRouter unavailable/rate-limited; falling back to Groq...');
+    }
   }
 
   const parsed = await callGroqJSON(prompt, systemPrompt);
   return { parsed, provider: `Groq (${GROQ_MODEL})` };
+}
+
+// Analyzer: prefers Groq (fast) -> automatically falls back to OpenRouter :free if Groq TPD is exhausted
+async function callAnalyzerJSON(prompt) {
+  const systemPrompt = 'You return strictly one valid raw JSON object only.';
+  try {
+    return await callGroqJSON(prompt, systemPrompt);
+  } catch (groqErr) {
+    if (OPENROUTER_KEYS.length > 0) {
+      console.warn(`↩️ [Analyzer] Groq exhausted (${groqErr.message.slice(0, 90)}); falling back to OpenRouter...`);
+      const res = await callOpenRouterJSON(prompt, systemPrompt, 1024);
+      return res.parsed;
+    }
+    throw groqErr;
+  }
 }
 
 // ── Jina AI Reader (with safe URL validation) ───────────────
@@ -658,7 +748,7 @@ function writeGitHubStepSummary(stats) {
 
 // ── Main ────────────────────────────────────────────────────
 async function main() {
-  console.log(`🚀 [BBN Pipeline] Starting (dryRun=${DRY_RUN}, groqKeys=${GROQ_KEYS.length})`);
+  console.log(`🚀 [BBN Pipeline] Starting (dryRun=${DRY_RUN}, groqKeys=${GROQ_KEYS.length}, openRouterKeys=${OPENROUTER_KEYS.length})`);
 
   const stats = {
     feedsOk: 0,
@@ -705,8 +795,8 @@ async function main() {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error('SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required');
   }
-  if (GROQ_KEYS.length === 0) {
-    throw new Error('GROQ_API_KEYS is required');
+  if (GROQ_KEYS.length === 0 && OPENROUTER_KEYS.length === 0) {
+    throw new Error('At least one of GROQ_API_KEYS or OPENROUTER_API_KEY is required');
   }
 
   // 3. Load recent records from Supabase for deduplication & schema discovery
@@ -796,7 +886,7 @@ async function main() {
 
       let analysis;
       try {
-        analysis = await callGroqJSON(buildAnalyzerPrompt(item, recentHeadlines48h));
+        analysis = await callAnalyzerJSON(buildAnalyzerPrompt(item, recentHeadlines48h));
         stats.analyzerSuccess++;
       } catch (err) {
         stats.analyzerErrors.push(`Analyzer (${item.title.slice(0, 40)}): ${err.message}`);
@@ -842,9 +932,12 @@ async function main() {
           try {
             const bgUrl = await findBestBackgroundImage({
               headline: cleanEnHeadline,
+              summary: enEd.summary || enEd.hook || '',
               wikimediaQuery: enEd.wikimedia_query,
               pexelsQuery: enEd.pexels_query,
               pexelsApiKey: PEXELS_API_KEY,
+              groqKeys: GROQ_KEYS,
+              openRouterKeys: OPENROUTER_KEYS,
             });
             const cardTitle = String(enEd.image_headline || cleanEnHeadline)
               .replace(/\*\*/g, '')
