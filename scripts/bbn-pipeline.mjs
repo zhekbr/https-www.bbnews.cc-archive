@@ -69,7 +69,11 @@ const OPENROUTER_PAID_INTERVAL_MINUTES = parseInt(process.env.OPENROUTER_PAID_IN
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const JINA_API_KEY = process.env.JINA_API_KEY || '';
+const JINA_KEYS = [process.env.JINA_API_KEY, process.env.JINA_API_KEY2, ...(process.env.JINA_API_KEYS || '').split(/[\s,;]+/)]
+  .map((k) => String(k || '').trim())
+  .filter(Boolean)
+  .filter((k, idx, arr) => arr.indexOf(k) === idx);
+let jinaKeyCursor = 0;
 const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
 const POSTPULSE_CLIENT_ID = (process.env.POSTPULSE_CLIENT_ID || '').trim();
 const POSTPULSE_CLIENT_SECRET = (process.env.POSTPULSE_CLIENT_SECRET || '').trim();
@@ -601,38 +605,53 @@ const COOKIE_PAYWALL_RE =
   /(cookie consent|accept all cookies|manage cookies|privacy preferences|we value your privacy|enable javascript to continue|please verify you are a human|subscribe to continue reading|already a subscriber\? sign in)/i;
 
 async function fetchFullArticleText(url, fallbackSnippet) {
-  if (!JINA_API_KEY || !/^https?:\/\//i.test(url)) return fallbackSnippet;
+  if (JINA_KEYS.length === 0 || !/^https?:\/\//i.test(url)) return fallbackSnippet;
   try {
     const parsed = new URL(url);
     if (['localhost', '127.0.0.1', '0.0.0.0'].includes(parsed.hostname)) return fallbackSnippet;
 
-    const res = await fetch(`https://r.jina.ai/${url}`, {
-      signal: AbortSignal.timeout(20000),
-      headers: {
-        'Authorization': `Bearer ${JINA_API_KEY}`,
-        'Accept': 'application/json',
-        'X-Return-Format': 'markdown',
-        'X-No-Cache': 'true',
-        'X-Remove-Selector': 'header, footer, nav, .comments',
-      },
-    });
-    if (!res.ok) return fallbackSnippet;
-    const json = await res.json();
-    let text = json?.data?.content || '';
-    text = text
-      .replace(/\[[A-Za-z0-9\s]+?\$[\d,.]+\s+[\d,.]+?%\]/gi, '')
-      .replace(/\[.*?\]\((https?:\/\/[^\s]+)\)/gi, '')
-      .replace(/Share this article/gi, '')
-      .replace(/Copy link/gi, '')
-      .trim();
+    for (let attempt = 0; attempt < JINA_KEYS.length; attempt++) {
+      const keyIdx = (jinaKeyCursor + attempt) % JINA_KEYS.length;
+      const jinaKey = JINA_KEYS[keyIdx];
+      try {
+        const res = await fetch(`https://r.jina.ai/${url}`, {
+          signal: AbortSignal.timeout(20000),
+          headers: {
+            'Authorization': `Bearer ${jinaKey}`,
+            'Accept': 'application/json',
+            'X-Return-Format': 'markdown',
+            'X-No-Cache': 'true',
+            'X-Remove-Selector': 'header, footer, nav, .comments',
+          },
+        });
+        if (res.status === 401 || res.status === 402 || res.status === 429 || res.status >= 500) {
+          console.warn(`[Jina] Key #${keyIdx + 1} HTTP ${res.status}; trying next Jina key...`);
+          continue;
+        }
+        if (!res.ok) return fallbackSnippet;
 
-    // Reject cookie-consent / paywall walls so the LLM never writes an article about cookies!
-    if (COOKIE_PAYWALL_RE.test(text.slice(0, 1200)) && text.length < 2500) {
-      console.warn(`[Jina] Detected cookie/paywall wall for ${url}; using clean RSS snippet instead.`);
-      return fallbackSnippet;
+        jinaKeyCursor = (keyIdx + 1) % JINA_KEYS.length;
+        const json = await res.json();
+        let text = json?.data?.content || '';
+        text = text
+          .replace(/\[[A-Za-z0-9\s]+?\$[\d,.]+\s+[\d,.]+?%\]/gi, '')
+          .replace(/\[.*?\]\((https?:\/\/[^\s]+)\)/gi, '')
+          .replace(/Share this article/gi, '')
+          .replace(/Copy link/gi, '')
+          .trim();
+
+        // Reject cookie-consent / paywall walls so the LLM never writes an article about cookies!
+        if (COOKIE_PAYWALL_RE.test(text.slice(0, 1200)) && text.length < 2500) {
+          console.warn(`[Jina] Detected cookie/paywall wall for ${url}; using clean RSS snippet instead.`);
+          return fallbackSnippet;
+        }
+
+        return text.length > 200 ? text.slice(0, 8000) : fallbackSnippet;
+      } catch (err) {
+        console.warn(`[Jina] Key #${keyIdx + 1} failed for ${url}: ${err.message}`);
+      }
     }
-
-    return text.length > 200 ? text.slice(0, 8000) : fallbackSnippet;
+    return fallbackSnippet;
   } catch (err) {
     console.warn(`[Jina] Failed for ${url}: ${err.message}`);
     return fallbackSnippet;
