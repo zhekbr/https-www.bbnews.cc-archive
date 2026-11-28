@@ -1326,24 +1326,39 @@ function generateSitemap(enArticles, ptArticles, baseUrl, enTagsMap = new Map(),
   </url>`;
   });
 
-  // News article entries
+  // News article entries (Google News Sitemap spec: <news:news> only for last 48h, ISO 639-1 2-letter lang)
+  const newsCutoffMs = Date.now() - (48 * 60 * 60 * 1000);
+  let newsTagCount = 0;
   const buildNewsEntries = (articles, lang) => {
-    const newsLang = lang === 'en' ? 'en' : 'pt-br';
+    const newsLang = lang === 'en' ? 'en' : 'pt';
     return articles.map(post => {
-      const articleUrl = `${baseUrl}/${lang}/news/${post.slug}`;
-      const pubDate = post.time ? new Date(post.time).toISOString() : new Date().toISOString();
+      const articleUrl = escXml(`${baseUrl}/${lang}/news/${post.slug}`);
+      const pubTime = post.time ? new Date(post.time) : new Date();
+      const pubMs = Number.isNaN(pubTime.getTime()) ? Date.now() : pubTime.getTime();
+      const pubDate = new Date(pubMs).toISOString();
       const lastmod = pubDate.split('T')[0];
       const title = escXml(post.title);
-      const keywords = escXml((post.tags || []).slice(0, 10).join(', '));
-      const tickers = detectTickers(post.title, post.tags);
-      const tickerBlock = tickers ? `\n      <news:stock_tickers>${escXml(tickers)}</news:stock_tickers>` : '';
 
       let alternateLinkBlock = '';
       if (post.translation) {
         const transLang = lang === 'en' ? 'pt-BR' : 'en';
         const transTarget = lang === 'en' ? 'pt' : 'en';
-        const transUrl = `${baseUrl}/${transTarget}/news/${post.translation.slug}`;
+        const transUrl = escXml(`${baseUrl}/${transTarget}/news/${post.translation.slug}`);
         alternateLinkBlock = `\n    <xhtml:link rel="alternate" hreflang="${transLang}" href="${transUrl}" />`;
+      }
+
+      let newsBlock = '';
+      if (pubMs >= newsCutoffMs && newsTagCount < 1000) {
+        newsTagCount++;
+        newsBlock = `
+    <news:news>
+      <news:publication>
+        <news:name>Bitcoin Brasil News</news:name>
+        <news:language>${newsLang}</news:language>
+      </news:publication>
+      <news:publication_date>${pubDate}</news:publication_date>
+      <news:title>${title}</news:title>
+    </news:news>`;
       }
 
       return `
@@ -1352,17 +1367,7 @@ function generateSitemap(enArticles, ptArticles, baseUrl, enTagsMap = new Map(),
     <lastmod>${lastmod}</lastmod>${alternateLinkBlock}
     <image:image>
       <image:loc>${defaultImage}</image:loc>
-      <image:title>${title}</image:title>
-    </image:image>
-    <news:news>
-      <news:publication>
-        <news:name>Bitcoin Brasil News</news:name>
-        <news:language>${newsLang}</news:language>
-      </news:publication>
-      <news:publication_date>${pubDate}</news:publication_date>
-      <news:title>${title}</news:title>
-      <news:keywords>${keywords}</news:keywords>${tickerBlock}
-    </news:news>
+    </image:image>${newsBlock}
   </url>`;
     }).join('');
   };

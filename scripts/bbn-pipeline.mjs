@@ -25,7 +25,7 @@ const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
 const MAX_AI_SIMILARITY = parseInt(process.env.BBN_MAX_SIMILARITY || '60', 10);
 const MAX_LOCAL_SIMILARITY = parseInt(process.env.BBN_MAX_LOCAL_SIMILARITY || '50', 10);
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
-const GROQ_ANALYZER_FALLBACK_MODEL = process.env.GROQ_ANALYZER_FALLBACK_MODEL || 'llama-3.1-8b-instant';
+const LLM_COOLDOWN_MS = parseInt(process.env.LLM_COOLDOWN_MINUTES || '120', 10) * 60 * 1000; // 2 hours
 
 function loadOpenRouterKeys() {
   const keys = [];
@@ -102,13 +102,87 @@ function loadGroqKeys() {
 
 const GROQ_KEYS = loadGroqKeys();
 let groqKeyCursor = 0;
-// Track exhausted keys per model (each Groq model has its own independent daily TPD quota!)
 const exhaustedGroqKeysByModel = new Map();
 function getExhaustedSet(model) {
   if (!exhaustedGroqKeysByModel.has(model)) exhaustedGroqKeysByModel.set(model, new Set());
   return exhaustedGroqKeysByModel.get(model);
 }
 const invalidGroqKeys = new Set();
+
+// Persistent 2-hour cooldown map across GitHub Actions runs (stored in Supabase `system_tokens`)
+let llmCooldowns = {};
+let llmCooldownsDirty = false;
+
+function isModelInCooldown(id) {
+  const until = Number(llmCooldowns[id] || 0);
+  return until > Date.now();
+}
+
+function putModelInCooldown(id, reason, durationMs = LLM_COOLDOWN_MS) {
+  const until = Date.now() + durationMs;
+  llmCooldowns[id] = until;
+  llmCooldownsDirty = true;
+  const mins = Math.round(durationMs / 60000);
+  console.warn(`⏸️ [Cooldown] ${id} paused for ${mins}m (${reason})`);
+}
+
+async function loadLlmCooldowns() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/system_tokens?service=eq.llm_cooldowns&select=access_token`, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+    });
+    if (!res.ok) return;
+    const rows = await res.json();
+    const raw = rows?.[0]?.access_token;
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    const now = Date.now();
+    llmCooldowns = {};
+    for (const [k, until] of Object.entries(parsed || {})) {
+      if (Number(until) > now) llmCooldowns[k] = Number(until);
+    }
+    const active = Object.keys(llmCooldowns);
+    if (active.length > 0) {
+      console.log(`⏱️ [Cooldown] Skipping ${active.length} rate-limited model(s) (2h window): ${active.join(', ')}`);
+    }
+  } catch {
+    // ignore load error
+  }
+}
+
+async function saveLlmCooldowns() {
+  if (!llmCooldownsDirty || !SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return;
+  try {
+    const now = Date.now();
+    const pruned = {};
+    for (const [k, until] of Object.entries(llmCooldowns)) {
+      if (Number(until) > now) pruned[k] = Number(until);
+    }
+    await fetch(`${SUPABASE_URL}/rest/v1/system_tokens?on_conflict=service`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': SUPABASE_SERVICE_ROLE_KEY,
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        service: 'llm_cooldowns',
+        access_token: JSON.stringify(pruned),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+    llmCooldownsDirty = false;
+  } catch (err) {
+    console.warn(`[Cooldown] Could not save llm_cooldowns: ${err.message}`);
+  }
+}
 
 // ── 20 RSS Feeds (from bbn.json) ────────────────────────────
 const RSS_FEEDS = [
@@ -342,13 +416,19 @@ function filterAndRank(items) {
   return candidates.sort((a, b) => b.preScore - a.preScore);
 }
 
-// ── Multi-Key Rotating Groq Client (per-model TPD tracking) ──
+// ── Multi-Key Rotating Groq Client (with 2-hour persistent cooldown) ──
 async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid raw JSON objects only.', model = GROQ_MODEL) {
+  const cooldownKey = `groq:${model}`;
+  if (isModelInCooldown(cooldownKey)) {
+    throw new Error(`${cooldownKey} in 2h cooldown`);
+  }
+
   const exhaustedForModel = getExhaustedSet(model);
   const availableIndices = GROQ_KEYS.map((_, i) => i).filter(
     (i) => !invalidGroqKeys.has(i) && !exhaustedForModel.has(i)
   );
   if (availableIndices.length === 0) {
+    putModelInCooldown(cooldownKey, 'all Groq keys exhausted');
     throw new Error(`All Groq API keys are exhausted or invalid for ${model}`);
   }
 
@@ -372,7 +452,7 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
     try {
       const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
         method: 'POST',
-        signal: AbortSignal.timeout(35000),
+        signal: AbortSignal.timeout(25000),
         headers: {
           'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
@@ -387,6 +467,12 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
           ],
         }),
       });
+
+      if (res.status === 404) {
+        const body = await res.text();
+        putModelInCooldown(cooldownKey, 'HTTP 404 model_not_found', 24 * 60 * 60 * 1000);
+        throw new Error(`Groq HTTP 404: ${body.slice(0, 140)}`);
+      }
 
       if (res.status === 401) {
         const body = await res.text();
@@ -418,8 +504,15 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
       return extractJsonObject(raw);
     } catch (err) {
       lastError = err;
+      if (isModelInCooldown(cooldownKey)) break;
       console.warn(`[Groq] Attempt ${attempt + 1} (Key #${keyIdx + 1}, ${model}) error: ${err.message}`);
     }
+  }
+
+  // If every valid key hit TPD for this model, put it in 2-hour cooldown across runs
+  const remaining = GROQ_KEYS.map((_, i) => i).filter((i) => !invalidGroqKeys.has(i) && !exhaustedForModel.has(i));
+  if (remaining.length === 0) {
+    putModelInCooldown(cooldownKey, 'all Groq keys hit TPD');
   }
 
   throw lastError || new Error(`All Groq API keys failed for ${model}`);
@@ -437,13 +530,19 @@ function extractJsonObject(raw) {
   return JSON.parse(cleaned);
 }
 
-async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelList = OPENROUTER_MODELS) {
+async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelList = OPENROUTER_MODELS, { respectCooldown = true } = {}) {
   if (OPENROUTER_KEYS.length === 0) {
     throw new Error('No OpenRouter API keys configured');
   }
 
   let lastError = null;
   for (const model of modelList) {
+    const cooldownKey = `or:${model}`;
+    const isFreeModel = model.endsWith(':free') || model === 'openrouter/free';
+    if (respectCooldown && isFreeModel && isModelInCooldown(cooldownKey)) {
+      continue;
+    }
+
     for (let kAttempt = 0; kAttempt < OPENROUTER_KEYS.length; kAttempt++) {
       const keyIdx = openRouterKeyCursor % OPENROUTER_KEYS.length;
       openRouterKeyCursor = (openRouterKeyCursor + 1) % OPENROUTER_KEYS.length;
@@ -452,7 +551,7 @@ async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelL
       try {
         const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
           method: 'POST',
-          signal: AbortSignal.timeout(30000),
+          signal: AbortSignal.timeout(25000),
           headers: {
             'Authorization': `Bearer ${apiKey}`,
             'Content-Type': 'application/json',
@@ -475,7 +574,10 @@ async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelL
           const body = await res.text();
           console.warn(`[OpenRouter] ${model} (Key #${keyIdx + 1}) HTTP ${res.status} (${body.slice(0, 120)}); trying next...`);
           lastError = new Error(`OpenRouter HTTP ${res.status}: ${body.slice(0, 140)}`);
-          // If upstream model itself is rate-limited, jump straight to next model
+          if (isFreeModel && res.status === 429) {
+            putModelInCooldown(cooldownKey, 'HTTP 429 rate-limited');
+            break;
+          }
           if (/upstream|temporarily rate-limited/i.test(body)) break;
           continue;
         }
@@ -483,6 +585,9 @@ async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelL
           const body = await res.text();
           console.warn(`[OpenRouter] ${model} (Key #${keyIdx + 1}) HTTP ${res.status}: ${body.slice(0, 160)}`);
           lastError = new Error(`OpenRouter HTTP ${res.status}`);
+          if (isFreeModel && res.status === 404) {
+            putModelInCooldown(cooldownKey, 'HTTP 404');
+          }
           break;
         }
 
@@ -494,12 +599,15 @@ async function callOpenRouterJSON(prompt, systemPrompt, maxTokens = 4096, modelL
       } catch (err) {
         lastError = err;
         console.warn(`[OpenRouter] ${model} (Key #${keyIdx + 1}) failed: ${err.message}`);
+        if (isFreeModel && /timeout|aborted|Unexpected end of JSON/i.test(err.message)) {
+          putModelInCooldown(cooldownKey, err.message.slice(0, 50));
+        }
         break;
       }
     }
   }
 
-  throw lastError || new Error('All OpenRouter models/keys failed');
+  throw lastError || new Error('All OpenRouter models/keys failed or in cooldown');
 }
 
 // Track last paid OpenRouter article timestamp in private Supabase `system_tokens`
@@ -546,14 +654,15 @@ async function saveLastPaidOpenRouterTs(ts) {
 }
 
 // Writer:
-// - If allowPaidOpenRouter=true (max 1 article every 3h): uses cheap high-quality paid OpenRouter models first
-// - Otherwise: uses OpenRouter :free -> Groq (and never spends paid credits)
+// 1. If 3h paid slot is unlocked -> cheap high-quality paid OpenRouter (deepseek-v3.2 / gemini-2.5-flash-lite / gpt-4o-mini)
+// 2. Otherwise -> free models (OpenRouter :free -> Groq), skipping any in 2h cooldown
+// 3. Final safety net: if ALL free models are in 2h cooldown/exhausted -> cheap paid OpenRouter so site never stops!
 async function callOpenRouterOrGroqJSON(prompt, { allowPaidOpenRouter = false } = {}) {
   const systemPrompt = 'You are a senior financial and geopolitical journalist. Return strictly one valid raw JSON object with no markdown fences or extra text.';
 
   if (OPENROUTER_KEYS.length > 0 && allowPaidOpenRouter) {
     try {
-      return await callOpenRouterJSON(prompt, systemPrompt, 4096, OPENROUTER_PAID_MODELS);
+      return await callOpenRouterJSON(prompt, systemPrompt, 4096, OPENROUTER_PAID_MODELS, { respectCooldown: false });
     } catch (paidErr) {
       console.warn(`↩️ [Writer] Paid OpenRouter failed (${paidErr.message.slice(0, 90)}); trying free models...`);
     }
@@ -563,36 +672,41 @@ async function callOpenRouterOrGroqJSON(prompt, { allowPaidOpenRouter = false } 
     try {
       return await callOpenRouterJSON(prompt, systemPrompt, 4096, OPENROUTER_MODELS);
     } catch {
-      console.warn('↩️ [Writer] Free OpenRouter unavailable/rate-limited; falling back to Groq...');
+      // fall through to Groq
     }
   }
 
-  const parsed = await callGroqJSON(prompt, systemPrompt);
-  return { parsed, provider: `Groq (${GROQ_MODEL})` };
+  try {
+    const parsed = await callGroqJSON(prompt, systemPrompt, GROQ_MODEL);
+    return { parsed, provider: `Groq (${GROQ_MODEL})` };
+  } catch (groqErr) {
+    // All free providers exhausted -> fall back to ultra-cheap paid OpenRouter immediately
+    if (OPENROUTER_KEYS.length > 0) {
+      console.warn('↩️ [Writer] All free LLMs in 2h cooldown/exhausted; using cheap paid OpenRouter...');
+      return await callOpenRouterJSON(prompt, systemPrompt, 4096, OPENROUTER_PAID_MODELS, { respectCooldown: false });
+    }
+    throw groqErr;
+  }
 }
 
-// Analyzer: Groq primary -> Groq llama-3.1-8b-instant (500k TPD/key!) -> OpenRouter :free -> emergency gemini-2.5-flash-lite
+// Analyzer: Groq (skips instantly if in 2h cooldown) -> OpenRouter :free (skips if in 2h cooldown) -> ultra-cheap gemini-2.5-flash-lite
 async function callAnalyzerJSON(prompt) {
   const systemPrompt = 'You return strictly one valid raw JSON object only.';
   try {
     return await callGroqJSON(prompt, systemPrompt, GROQ_MODEL);
   } catch (groqErr) {
-    // Try secondary Groq model with separate 500k TPD quota per key
-    try {
-      console.warn(`↩️ [Analyzer] ${GROQ_MODEL} exhausted; switching to Groq ${GROQ_ANALYZER_FALLBACK_MODEL}...`);
-      return await callGroqJSON(prompt, systemPrompt, GROQ_ANALYZER_FALLBACK_MODEL);
-    } catch {
-      // fall through to OpenRouter
-    }
-
     if (OPENROUTER_KEYS.length > 0) {
-      console.warn(`↩️ [Analyzer] All Groq models exhausted (${groqErr.message.slice(0, 70)}); falling back to OpenRouter...`);
       try {
         const res = await callOpenRouterJSON(prompt, systemPrompt, 2048, OPENROUTER_MODELS);
         return res.parsed;
       } catch {
-        console.warn('↩️ [Analyzer] OpenRouter :free busy; using emergency ultra-cheap model (gemini-2.5-flash-lite)...');
-        const res = await callOpenRouterJSON(prompt, systemPrompt, 2048, ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini']);
+        const res = await callOpenRouterJSON(
+          prompt,
+          systemPrompt,
+          2048,
+          ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini'],
+          { respectCooldown: false }
+        );
         return res.parsed;
       }
     }
@@ -961,7 +1075,8 @@ async function main() {
     return;
   }
 
-  // 4. Analyze urgency with Groq (rotating keys) & generate post images
+  // 4. Load persistent 2h LLM cooldowns + paid slot timer & init image renderer
+  await loadLlmCooldowns();
   let publishedCount = 0;
   let lastPaidOpenRouterTs = await getLastPaidOpenRouterTs();
   let imageRenderer = await createImageRenderer();
@@ -1231,6 +1346,7 @@ async function main() {
       }
     }
   } finally {
+    await saveLlmCooldowns();
     if (imageRenderer) {
       await imageRenderer.close();
     }
