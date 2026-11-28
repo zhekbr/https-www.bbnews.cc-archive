@@ -19,7 +19,7 @@ import {
 } from './postpulse.mjs';
 
 const DRY_RUN = process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
-const MAX_ANALYZE = parseInt(process.env.BBN_MAX_ANALYZE || '10', 10);
+const MAX_ANALYZE = parseInt(process.env.BBN_MAX_ANALYZE || '15', 10);
 const MAX_PUBLISH = parseInt(process.env.BBN_MAX_PUBLISH || '4', 10);
 const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
 const MAX_AI_SIMILARITY = parseInt(process.env.BBN_MAX_SIMILARITY || '60', 10);
@@ -184,7 +184,7 @@ async function saveLlmCooldowns() {
   }
 }
 
-// ── 20 RSS Feeds (from bbn.json) ────────────────────────────
+// ── 27 RSS Feeds (Geopolitics, Macro, Crypto & Brazil) ──────
 const RSS_FEEDS = [
   { name: 'CNBC', url: 'https://www.cnbc.com/id/100727362/device/rss/rss.html' },
   { name: 'SCMP', url: 'https://www.scmp.com/rss/91/feed' },
@@ -193,7 +193,8 @@ const RSS_FEEDS = [
   { name: 'OilPrice', url: 'https://oilprice.com/rss/main' },
   { name: 'Middle East Eye', url: 'https://www.middleeasteye.net/rss' },
   { name: 'Kitco', url: 'https://www.kitco.com/news/category/gold/feed/' },
-  { name: 'Yahoo Finance', url: 'https://finance.yahoo.com/news/rssindex' },
+  { name: 'MarketWatch', url: 'https://feeds.content.dowjones.io/public/rss/mw_topstories' },
+  { name: 'Investing.com', url: 'https://www.investing.com/rss/news.rss' },
   { name: 'Financial Times', url: 'https://www.ft.com/global-economy?format=rss' },
   { name: 'ZeroHedge', url: 'https://feeds.feedburner.com/zerohedge/feed' },
   { name: 'The Diplomat', url: 'https://thediplomat.com/feed/' },
@@ -206,12 +207,19 @@ const RSS_FEEDS = [
   { name: 'BBC World', url: 'http://feeds.bbci.co.uk/news/world/rss.xml' },
   { name: 'CoinDesk', url: 'https://www.coindesk.com/arc/outboundfeeds/rss/' },
   { name: 'Cointelegraph', url: 'https://cointelegraph.com/rss' },
+  { name: 'The Block', url: 'https://www.theblock.co/rss.xml' },
+  { name: 'Bitcoin Magazine', url: 'https://bitcoinmagazine.com/feed' },
+  { name: 'DL News', url: 'https://www.dlnews.com/arc/outboundfeeds/rss/' },
+  { name: 'Blockworks', url: 'https://blockworks.co/feed' },
+  { name: 'InfoMoney', url: 'https://www.infomoney.com.br/feed/' },
+  { name: 'Portal do Bitcoin', url: 'https://portaldobitcoin.uol.com.br/feed/' },
 ];
 
 const TIER1_DOMAINS = [
   'reuters.com', 'bbc.co.uk', 'bbc.com',
   'apnews.com', 'aljazeera.com', 'theguardian.com',
   'ft.com', 'zerohedge.com', 'al-monitor.com', 'cnbc.com',
+  'marketwatch.com', 'theblock.co', 'dlnews.com', 'blockworks.co',
 ];
 
 const PRIMARY_KEYWORDS = [
