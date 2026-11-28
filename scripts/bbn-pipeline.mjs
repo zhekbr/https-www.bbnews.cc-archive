@@ -1172,9 +1172,11 @@ async function main() {
         const cleanEnHeadline = String(enEd.headline || analysis.headline || item.title).replace(/\*\*/g, '').trim();
         const cleanPtHeadline = String(ptEd.headline || cleanEnHeadline).replace(/\*\*/g, '').trim();
 
-        // Guard against cookie-consent / paywall garbage ever reaching the site or social media
-        if (/(cookie consent|not financial news|enable javascript|access denied|subscribe to read)/i.test(cleanEnHeadline)) {
-          console.warn(`🗑️ [Guard] Rejected paywall/cookie garbage article: "${cleanEnHeadline}"`);
+        // Guard against cookie-consent / paywall / AI refusal garbage ever reaching the site or social media
+        const GARBAGE_HEADLINE_RE =
+          /(cookie consent|not financial news|enable javascript|access denied|subscribe to read|no usable news data|for article generation|cannot generate|unable to generate|insufficient (news|data|information)|no news content|missing article|sem dados utiliz[áa]veis|n[ãa]o foi poss[íi]vel gerar|conte[úu]do indispon[íi]vel)/i;
+        if (GARBAGE_HEADLINE_RE.test(cleanEnHeadline) || GARBAGE_HEADLINE_RE.test(cleanPtHeadline)) {
+          console.warn(`🗑️ [Guard] Rejected paywall/cookie/AI-error garbage article: "${cleanEnHeadline}"`);
           continue;
         }
 

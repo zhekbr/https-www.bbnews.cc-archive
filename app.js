@@ -781,6 +781,11 @@ function isValidClientArticle(item) {
     return false;
   }
 
+  // Reject AI refusal/error placeholders or scraped paywall/cookie banners
+  if (/(no usable news data|for article generation|cannot generate|unable to generate|insufficient (news|data|information)|cookie consent|not financial news|enable javascript|access denied|sem dados utiliz[áa]veis|n[ãa]o foi poss[íi]vel gerar)/i.test(rawTitle)) {
+    return false;
+  }
+
   return true;
 }
 
@@ -1278,28 +1283,58 @@ function showError(err) {
 }
 
 async function fetchBtcPrice() {
-  try {
-    const res = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const raw = parseFloat(json?.price);
-    if (isNaN(raw)) throw new Error('Invalid price');
-    const formatted = raw.toLocaleString('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    });
-    const el = document.getElementById('btc-price');
-    if (!el) return;
-    if (el.textContent !== formatted) {
-      el.textContent = formatted;
-      el.classList.remove('price-update');
-      void el.offsetWidth;
-      el.classList.add('price-update');
+  const providers = [
+    {
+      name: 'Coinbase',
+      url: 'https://api.coinbase.com/v2/prices/BTC-USD/spot',
+      parse: (json) => parseFloat(json?.data?.amount)
+    },
+    {
+      name: 'Kraken',
+      url: 'https://api.kraken.com/0/public/Ticker?pair=XBTUSD',
+      parse: (json) => parseFloat(json?.result?.XXBTZUSD?.c?.[0])
+    },
+    {
+      name: 'Binance',
+      url: 'https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT',
+      parse: (json) => parseFloat(json?.price)
     }
-  } catch (err) {
-    console.warn('[BBN BTC] Error fetching price:', err.message);
+  ];
+
+  let raw = NaN;
+  for (const provider of providers) {
+    try {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timer = controller ? setTimeout(() => controller.abort(), 5000) : null;
+      const res = await fetch(provider.url, controller ? { signal: controller.signal } : undefined);
+      if (timer) clearTimeout(timer);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const parsed = provider.parse(json);
+      if (!isNaN(parsed) && parsed > 0) {
+        raw = parsed;
+        break;
+      }
+    } catch (err) {
+      console.warn(`[BBN BTC] ${provider.name} failed:`, err.message);
+    }
+  }
+
+  if (isNaN(raw)) return;
+
+  const formatted = raw.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const el = document.getElementById('btc-price');
+  if (!el) return;
+  if (el.textContent !== formatted) {
+    el.textContent = formatted;
+    el.classList.remove('price-update');
+    void el.offsetWidth;
+    el.classList.add('price-update');
   }
 }
 

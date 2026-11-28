@@ -453,6 +453,8 @@ footer {
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
     scroll-behavior: auto;
+    scroll-snap-type: x proximity;
+    padding: 0 0.75rem;
   }
   .scroll-row::-webkit-scrollbar {
     display: none;
@@ -463,10 +465,43 @@ footer {
   .logo { font-size: clamp(2.6rem, 18vw, 4.5rem); }
   .logo-eyebrow { font-size: 0.52rem; letter-spacing: 0.15em; }
   header { padding: 1rem 1rem 0.75rem; flex-direction: column; gap: 0.6rem; }
-  .header-meta { position: static; align-items: center; flex-direction: row; gap: 12px; }
-  .date-line { font-size: 0.52rem; }
+  .header-meta {
+    position: static;
+    align-items: center;
+    justify-content: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: 100%;
+    row-gap: 6px;
+    column-gap: 8px;
+  }
+  .date-line {
+    width: 100%;
+    text-align: center;
+    font-size: 0.6rem;
+    color: #888;
+    margin-top: 2px;
+  }
   .section-label { padding: 1rem 1rem 0.4rem; }
-  .news-card { width: 190px; padding: 0.55rem 0.75rem; scroll-snap-align: unset; }
+  .news-card {
+    width: 256px !important;
+    height: auto;
+    min-height: 112px;
+    padding: 0.7rem 0.85rem;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .card-headline {
+    font-size: 0.8rem;
+    line-height: 1.35;
+    -webkit-line-clamp: 4;
+  }
+  .card-time {
+    font-size: 0.56rem;
+    margin-top: 0.5rem;
+  }
   .expanded-panel { padding: 0.75rem 1rem; max-height: 60vh; overflow-y: auto; -webkit-overflow-scrolling: touch; }
   .panel-grid { grid-template-columns: 1fr; gap: 0.5rem; }
   .panel-hook { font-size: 1.2rem; }
@@ -478,7 +513,7 @@ footer {
 }
 @media (max-width: 340px) {
   .logo { font-size: clamp(2.2rem, 20vw, 3rem); letter-spacing: 0.03em; }
-  .news-card { width: 160px; }
+  .news-card { width: 220px !important; }
   .live-badge { font-size: 0.52rem; padding: 4px 8px; }
 }
 @media (hover: none) {

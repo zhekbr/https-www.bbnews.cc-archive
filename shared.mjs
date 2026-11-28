@@ -842,6 +842,11 @@ export function isValidArticleRecord(row) {
     return false;
   }
 
+  // Reject AI refusal/error placeholders or scraped paywall/cookie banners
+  if (/(no usable news data|for article generation|cannot generate|unable to generate|insufficient (news|data|information)|cookie consent|not financial news|enable javascript|access denied|sem dados utiliz[áa]veis|n[ãa]o foi poss[íi]vel gerar)/i.test(rawTitle)) {
+    return false;
+  }
+
   return true;
 }
 
