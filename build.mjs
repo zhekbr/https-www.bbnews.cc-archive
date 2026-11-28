@@ -1069,10 +1069,17 @@ function generateHomePage(articles, template, lang = 'en', tagCloudHtml = '') {
     key: CONFIG.supabaseKey
   });
 
+  const ogImage = `${CONFIG.baseUrl}${CONFIG.defaultOgImage}`;
+
   let html = template;
   html = html.replace(/\{\{HTML_LANG\}\}/g, () => dict.htmlLang);
-  html = html.replace(/\{\{PAGE_TITLE\}\}/g, () => dict.homeTitle);
-  html = html.replace(/\{\{PAGE_DESCRIPTION\}\}/g, () => dict.homeDesc);
+  html = html.replace(/\{\{PAGE_TITLE\}\}/g, () => esc(dict.homeTitle));
+  html = html.replace(/\{\{PAGE_DESCRIPTION\}\}/g, () => esc(dict.homeDesc));
+  html = html.replace(/\{\{TITLE\}\}/g, () => esc(dict.homeTitle));
+  html = html.replace(/\{\{DESCRIPTION\}\}/g, () => esc(dict.homeDesc));
+  html = html.replace(/\{\{OG_TITLE\}\}/g, () => esc(dict.homeTitle));
+  html = html.replace(/\{\{OG_DESCRIPTION\}\}/g, () => esc(dict.homeDesc));
+  html = html.replace(/\{\{OG_IMAGE\}\}/g, () => ogImage);
   html = html.replace(/\{\{CANONICAL_URL\}\}/g, () => canonicalUrl);
   html = html.replace(/\{\{HREFLANG_TAGS\}\}/g, () => hreflangTags);
   html = html.replace(/\{\{BASE_URL\}\}/g, () => CONFIG.baseUrl);
