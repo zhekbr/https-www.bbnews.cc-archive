@@ -52,7 +52,7 @@
       "destination": "/en/index.html"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!sitemap\\.xml|robots\\.txt|feed\\.xml|feed-pt\\.xml|articles\\.json|manifest\\.json|favicon\\.ico|assets/|.*\\.(?:css|js|xml|json|png|jpg|jpeg|webp|svg|ico|txt|woff2?)).*)",
       "destination": "/index.html"
     }
   ],
