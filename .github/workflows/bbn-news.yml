@@ -48,5 +48,6 @@ jobs:
           POSTPULSE_CLIENT_ID: ${{ secrets.POSTPULSE_CLIENT_ID }}
           POSTPULSE_CLIENT_SECRET: ${{ secrets.POSTPULSE_CLIENT_SECRET }}
           POSTPULSE_REFRESH_TOKEN: ${{ secrets.POSTPULSE_REFRESH_TOKEN }}
+          JINA_API_KEY2: ${{ secrets.JINA_API_KEY2 }}
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: node scripts/bbn-pipeline.mjs
