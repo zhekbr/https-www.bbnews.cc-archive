@@ -18,9 +18,9 @@ const STOP_WORDS = new Set([
   'with', 'after', 'amid', 'over', 'into', 'new', 'says', 'raises', 'hits',
 ]);
 
-// Reject logos, flags, maps, diagrams, icons, watermarks, and irrelevant tourist/interior shots
+// Reject logos, flags, maps, diagrams, icons, watermarks, screens, animals, vintage/irrelevant shots
 const WIKIMEDIA_BLOCKED_RE =
-  /(logo|flag|map|coat[\s_-]of[\s_-]arms|seal|emblem|icon|banner|diagram|chart|signature|stamp|crest|badge|symbol|locator|outline|blank|vector|watermark|screenshot|headline|newspaper|cover|poster|living[\s_-]room|bedroom|kitchen|bathroom|selfie|wedding|church|monastery|cathedral|restaurant|food|menu|flower|garden|statue|painting|museum[\s_-]interior|gravestone|cemetery)/i;
+  /(logo|flag|map|coat[\s_-]of[\s_-]arms|seal|emblem|icon|banner|diagram|chart|signature|stamp|crest|badge|symbol|locator|outline|blank|vector|watermark|screenshot|headline|newspaper|cover|poster|living[\s_-]room|bedroom|kitchen|bathroom|selfie|wedding|church|monastery|cathedral|restaurant|food|menu|flower|garden|statue|painting|museum[\s_-]interior|gravestone|cemetery|bird|crow|raven|vulture|eagle|hawk|pigeon|duck|animal|dog|cat|insect|fish|cookie|login|signup|19[0-8]\d)/i;
 
 const VISION_GROQ_MODEL = process.env.VISION_GROQ_MODEL || 'meta-llama/llama-4-scout-17b-16e-instruct';
 const VISION_OPENROUTER_MODELS = [
@@ -30,6 +30,63 @@ const VISION_OPENROUTER_MODELS = [
 ];
 const MIN_IMAGE_SCORE = parseInt(process.env.BBN_MIN_IMAGE_SCORE || '7', 10);
 const MAX_IMAGE_CANDIDATES_TO_JUDGE = parseInt(process.env.BBN_MAX_IMAGE_JUDGE || '6', 10);
+
+// Persistent anti-repeat background image history stored in private Supabase `system_tokens`
+const sessionUsedImages = new Set();
+
+async function loadUsedBackgroundImages({ supabaseUrl, serviceRoleKey }) {
+  const used = new Set(sessionUsedImages);
+  if (!supabaseUrl || !serviceRoleKey) return used;
+  try {
+    const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+    const res = await fetch(`${cleanUrl}/rest/v1/system_tokens?service=eq.used_bg_images&select=access_token`, {
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': serviceRoleKey,
+        'Authorization': `Bearer ${serviceRoleKey}`,
+      },
+    });
+    if (!res.ok) return used;
+    const rows = await res.json();
+    const raw = rows?.[0]?.access_token;
+    if (!raw) return used;
+    const arr = JSON.parse(raw);
+    if (Array.isArray(arr)) {
+      for (const u of arr) used.add(String(u));
+    }
+  } catch {
+    // ignore read error
+  }
+  return used;
+}
+
+async function recordUsedBackgroundImage({ url, usedSet, supabaseUrl, serviceRoleKey }) {
+  if (!url) return;
+  sessionUsedImages.add(url);
+  usedSet.add(url);
+  if (!supabaseUrl || !serviceRoleKey) return;
+  try {
+    const cleanUrl = supabaseUrl.replace(/\/+$/, '');
+    const pruned = Array.from(usedSet).slice(-200);
+    await fetch(`${cleanUrl}/rest/v1/system_tokens?on_conflict=service`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(10000),
+      headers: {
+        'apikey': serviceRoleKey,
+        'Authorization': `Bearer ${serviceRoleKey}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates,return=minimal',
+      },
+      body: JSON.stringify({
+        service: 'used_bg_images',
+        access_token: JSON.stringify(pruned),
+        updated_at: new Date().toISOString(),
+      }),
+    });
+  } catch (err) {
+    console.warn(`[Image] Could not persist used_bg_images: ${err.message}`);
+  }
+}
 
 function detectChromeExecutable() {
   const candidates = [
@@ -57,7 +114,7 @@ export function extractPexelsQuery(headline) {
   return words.slice(0, 3).join(' ') || 'bitcoin finance';
 }
 
-export async function searchWikimediaCandidates(query, maxResults = 4) {
+export async function searchWikimediaCandidates(query, maxResults = 6, usedUrls = new Set()) {
   const cleanQuery = String(query || '').trim();
   if (!cleanQuery) return [];
 
@@ -67,7 +124,7 @@ export async function searchWikimediaCandidates(query, maxResults = 4) {
       generator: 'search',
       gsrnamespace: '6',
       gsrsearch: `${cleanQuery} filetype:bitmap`,
-      gsrlimit: '15',
+      gsrlimit: '25',
       prop: 'imageinfo',
       iiprop: 'url|size|mime',
       iiurlwidth: '1280',
@@ -109,6 +166,7 @@ export async function searchWikimediaCandidates(query, maxResults = 4) {
 
       const url = info.thumburl || info.url || '';
       if (!/^https?:\/\//i.test(url)) continue;
+      if (usedUrls.has(url)) continue;
 
       if (WIKIMEDIA_BLOCKED_RE.test(title) || WIKIMEDIA_BLOCKED_RE.test(url)) continue;
 
@@ -140,12 +198,12 @@ export async function searchWikimediaImage(query) {
   return '';
 }
 
-export async function searchPexelsCandidates(queryOrHeadline, pexelsApiKey, maxResults = 5) {
+export async function searchPexelsCandidates(queryOrHeadline, pexelsApiKey, maxResults = 6, usedUrls = new Set()) {
   if (!pexelsApiKey) return [];
   const queries = [
     String(queryOrHeadline || '').trim(),
     extractPexelsQuery(queryOrHeadline),
-    'global finance dark city skyline',
+    'financial district architecture dusk',
   ].filter(Boolean);
 
   const tried = new Set();
@@ -158,7 +216,7 @@ export async function searchPexelsCandidates(queryOrHeadline, pexelsApiKey, maxR
     tried.add(q.toLowerCase());
 
     try {
-      const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=5`;
+      const url = `https://api.pexels.com/v1/search?query=${encodeURIComponent(q)}&per_page=12`;
       const res = await fetch(url, {
         signal: AbortSignal.timeout(10000),
         headers: {
@@ -171,7 +229,7 @@ export async function searchPexelsCandidates(queryOrHeadline, pexelsApiKey, maxR
       for (const p of json?.photos || []) {
         const photoUrl = p?.src?.large2x || p?.src?.large || p?.src?.original;
         const previewUrl = p?.src?.medium || photoUrl;
-        if (!photoUrl || seenUrls.has(photoUrl)) continue;
+        if (!photoUrl || seenUrls.has(photoUrl) || usedUrls.has(photoUrl)) continue;
         seenUrls.add(photoUrl);
         results.push({
           url: photoUrl,
@@ -207,16 +265,16 @@ function parseJudgeJson(raw) {
 }
 
 async function judgeImageWithVisionAI({ imageUrl, headline, summary, groqKeys = [], openRouterKeys = [] }) {
-  const prompt = `You are a strict Senior Photo Editor at Bloomberg / Financial Times choosing a background photo for a breaking news card.
+  const prompt = `You are a ruthless Senior Photo Editor at Bloomberg / Financial Times choosing a high-contrast background photo for a mobile news Reel cover.
 
 NEWS HEADLINE: ${headline}
 NEWS SUMMARY: ${String(summary || '').slice(0, 260)}
 
-Evaluate the attached image from 1 to 10 on visual quality, professionalism, and relevance to THIS specific news story:
-- 9-10: Editorial-grade, dramatic, crisp photo directly matching the exact subject, place, or scale of the news. Zero logos/watermarks/text.
-- 7-8: Strong, clean, professional photo that fits the news context and scale well. No cheesy stock vibes, no watermarks.
-- 4-6: Generic, mismatched scale (e.g. small concrete mixer for a megaproject, living room for a cyberattack, casual tourist shot, church for war news).
-- 1-3: Unrelated, cheesy/ugly stock photo, blurry, has watermarks/logos/text, or visually messy.
+Score the image from 1 to 10:
+- 9-10: Sharp, dramatic, well-lit editorial photo with ONE clear focal point (recognizable leader, government/central bank building, military/energy/port scene, financial market/city) directly matching THIS news. Zero text, zero watermarks.
+- 7-8: Clean, sharp, professional photo with a clear subject matching the topic and scale. Good lighting/contrast on mobile.
+- 4-6: Generic, low-contrast, too dark/muddy, mismatched scale (e.g. small concrete mixer for a megaproject), or weak focal point.
+- 1-3 (AUTOMATIC REJECT): Computer/phone screens, login/cookie forms, websites, screenshots, text/logos/watermarks, random birds/animals, vintage black-and-white old photos, nearly pitch-black frames, blurry shots, or unrelated rooms/churches.
 
 Return ONLY a valid JSON object:
 {"score": 7, "has_watermark": false, "reason": "max 12 words explaining why"}`;
@@ -314,11 +372,16 @@ export async function findBestBackgroundImage({
   pexelsApiKey,
   groqKeys = [],
   openRouterKeys = [],
+  supabaseUrl = '',
+  serviceRoleKey = '',
 }) {
-  // Gather candidate pool from both Wikimedia Commons and Pexels in parallel
+  // Load last 200 used background URLs so we NEVER repeat the same photo in the feed
+  const usedUrls = await loadUsedBackgroundImages({ supabaseUrl, serviceRoleKey });
+
+  // Gather fresh non-repeated candidate pool from both Wikimedia Commons and Pexels in parallel
   const [wikiList, pexelsList] = await Promise.all([
-    wikimediaQuery ? searchWikimediaCandidates(wikimediaQuery, 4) : Promise.resolve([]),
-    searchPexelsCandidates(pexelsQuery || headline, pexelsApiKey, 4),
+    wikimediaQuery ? searchWikimediaCandidates(wikimediaQuery, 5, usedUrls) : Promise.resolve([]),
+    searchPexelsCandidates(pexelsQuery || headline, pexelsApiKey, 5, usedUrls),
   ]);
 
   // Interleave candidates (Wikimedia + Pexels) so the Vision Judge evaluates diverse options quickly
@@ -331,14 +394,17 @@ export async function findBestBackgroundImage({
 
   if (pool.length === 0) {
     if (!pexelsApiKey && headline) {
-      return await searchWikimediaImage(extractPexelsQuery(headline));
+      const fallbackUrl = await searchWikimediaImage(extractPexelsQuery(headline));
+      if (fallbackUrl) await recordUsedBackgroundImage({ url: fallbackUrl, usedSet: usedUrls, supabaseUrl, serviceRoleKey });
+      return fallbackUrl;
     }
     return '';
   }
 
-  // If no Vision AI keys are available, return the first candidate
+  // If no Vision AI keys are available, return the first unused candidate
   if (groqKeys.length === 0 && openRouterKeys.length === 0) {
-    console.log(`🖼️ [Image] Selected (${pool[0].source}): ${pool[0].label}`);
+    console.log(`🖼️ [Image] Selected unused (${pool[0].source}): ${pool[0].label}`);
+    await recordUsedBackgroundImage({ url: pool[0].url, usedSet: usedUrls, supabaseUrl, serviceRoleKey });
     return pool[0].url;
   }
 
@@ -355,7 +421,6 @@ export async function findBestBackgroundImage({
     });
 
     if (!verdict) {
-      // Vision AI unavailable right now — fall back gracefully to best so far or first candidate
       if (!bestCandidate) bestCandidate = { ...cand, score: 6, reason: 'Vision AI unavailable' };
       break;
     }
@@ -371,16 +436,15 @@ export async function findBestBackgroundImage({
 
     if (effectiveScore >= MIN_IMAGE_SCORE && !verdict.hasWatermark) {
       console.log(`✅ [ImageJudge] Approved (${cand.source}, ${effectiveScore}/10): ${cand.label}`);
+      await recordUsedBackgroundImage({ url: cand.url, usedSet: usedUrls, supabaseUrl, serviceRoleKey });
       return cand.url;
     }
   }
 
-  if (bestCandidate) {
-    console.log(`🖼️ [ImageJudge] Picked best available (${bestCandidate.source}, ${bestCandidate.score}/10): ${bestCandidate.label}`);
-    return bestCandidate.url;
-  }
-
-  return pool[0].url;
+  const chosen = bestCandidate || pool[0];
+  console.log(`🖼️ [ImageJudge] Picked best unused (${chosen.source}, ${chosen.score || '?'}/10): ${chosen.label}`);
+  await recordUsedBackgroundImage({ url: chosen.url, usedSet: usedUrls, supabaseUrl, serviceRoleKey });
+  return chosen.url;
 }
 
 export async function createImageRenderer() {

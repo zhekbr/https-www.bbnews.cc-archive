@@ -25,6 +25,7 @@ const MIN_ALERT_SCORE = parseInt(process.env.BBN_MIN_SCORE || '8', 10);
 const MAX_AI_SIMILARITY = parseInt(process.env.BBN_MAX_SIMILARITY || '60', 10);
 const MAX_LOCAL_SIMILARITY = parseInt(process.env.BBN_MAX_LOCAL_SIMILARITY || '50', 10);
 const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const GROQ_ANALYZER_FALLBACK_MODEL = process.env.GROQ_ANALYZER_FALLBACK_MODEL || 'llama-3.1-8b-instant';
 
 function loadOpenRouterKeys() {
   const keys = [];
@@ -49,13 +50,11 @@ const OPENROUTER_MODELS = (
         process.env.OPENROUTER_MODEL.trim(),
         'google/gemma-4-26b-a4b-it:free',
         'google/gemma-4-31b-it:free',
-        'nvidia/nemotron-3.5-lightning:free',
         'openrouter/free',
       ]
     : [
         'google/gemma-4-26b-a4b-it:free',
         'google/gemma-4-31b-it:free',
-        'nvidia/nemotron-3.5-lightning:free',
         'openrouter/free',
       ]
 ).filter((m, idx, arr) => m && arr.indexOf(m) === idx);
@@ -99,7 +98,13 @@ function loadGroqKeys() {
 
 const GROQ_KEYS = loadGroqKeys();
 let groqKeyCursor = 0;
-const exhaustedGroqKeys = new Set();
+// Track exhausted keys per model (each Groq model has its own independent daily TPD quota!)
+const exhaustedGroqKeysByModel = new Map();
+function getExhaustedSet(model) {
+  if (!exhaustedGroqKeysByModel.has(model)) exhaustedGroqKeysByModel.set(model, new Set());
+  return exhaustedGroqKeysByModel.get(model);
+}
+const invalidGroqKeys = new Set();
 
 // ── 20 RSS Feeds (from bbn.json) ────────────────────────────
 const RSS_FEEDS = [
@@ -333,11 +338,14 @@ function filterAndRank(items) {
   return candidates.sort((a, b) => b.preScore - a.preScore);
 }
 
-// ── Multi-Key Rotating Groq Client (skips daily-exhausted/invalid keys) ──
-async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid raw JSON objects only.') {
-  const availableIndices = GROQ_KEYS.map((_, i) => i).filter((i) => !exhaustedGroqKeys.has(i));
+// ── Multi-Key Rotating Groq Client (per-model TPD tracking) ──
+async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid raw JSON objects only.', model = GROQ_MODEL) {
+  const exhaustedForModel = getExhaustedSet(model);
+  const availableIndices = GROQ_KEYS.map((_, i) => i).filter(
+    (i) => !invalidGroqKeys.has(i) && !exhaustedForModel.has(i)
+  );
   if (availableIndices.length === 0) {
-    throw new Error('All Groq API keys are exhausted or invalid for this run');
+    throw new Error(`All Groq API keys are exhausted or invalid for ${model}`);
   }
 
   let lastError = null;
@@ -348,7 +356,7 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
     let keyIdx = -1;
     for (let step = 0; step < GROQ_KEYS.length; step++) {
       const candidate = (groqKeyCursor + step) % GROQ_KEYS.length;
-      if (!exhaustedGroqKeys.has(candidate)) {
+      if (!invalidGroqKeys.has(candidate) && !exhaustedForModel.has(candidate)) {
         keyIdx = candidate;
         groqKeyCursor = (candidate + 1) % GROQ_KEYS.length;
         break;
@@ -366,7 +374,7 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: GROQ_MODEL,
+          model,
           temperature: 0.3,
           response_format: { type: 'json_object' },
           messages: [
@@ -378,7 +386,7 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
 
       if (res.status === 401) {
         const body = await res.text();
-        exhaustedGroqKeys.add(keyIdx);
+        invalidGroqKeys.add(keyIdx);
         console.warn(`[Groq] Key #${keyIdx + 1} invalid (HTTP 401); disabling for rest of run.`);
         lastError = new Error(`Groq HTTP 401: ${body.slice(0, 160)}`);
         continue;
@@ -387,10 +395,10 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
       if (res.status === 429 || res.status >= 500) {
         const body = await res.text();
         if (/tokens per day|TPD/i.test(body)) {
-          exhaustedGroqKeys.add(keyIdx);
-          console.warn(`[Groq] Key #${keyIdx + 1} hit daily TPD limit; disabling for rest of run.`);
+          exhaustedForModel.add(keyIdx);
+          console.warn(`[Groq] Key #${keyIdx + 1} hit daily TPD limit for ${model}; disabling for rest of run.`);
         } else {
-          console.warn(`[Groq] Key #${keyIdx + 1} returned HTTP ${res.status}; rotating to next key...`);
+          console.warn(`[Groq] Key #${keyIdx + 1} (${model}) returned HTTP ${res.status}; rotating to next key...`);
         }
         lastError = new Error(`Groq HTTP ${res.status}: ${body.slice(0, 200)}`);
         continue;
@@ -406,11 +414,11 @@ async function callGroqJSON(prompt, systemPrompt = 'You return strictly valid ra
       return extractJsonObject(raw);
     } catch (err) {
       lastError = err;
-      console.warn(`[Groq] Attempt ${attempt + 1} (Key #${keyIdx + 1}) error: ${err.message}`);
+      console.warn(`[Groq] Attempt ${attempt + 1} (Key #${keyIdx + 1}, ${model}) error: ${err.message}`);
     }
   }
 
-  throw lastError || new Error('All Groq API keys failed');
+  throw lastError || new Error(`All Groq API keys failed for ${model}`);
 }
 
 // ── Multi-Key OpenRouter Free Client ────────────────────────
@@ -559,20 +567,28 @@ async function callOpenRouterOrGroqJSON(prompt, { allowPaidOpenRouter = false } 
   return { parsed, provider: `Groq (${GROQ_MODEL})` };
 }
 
-// Analyzer: prefers Groq (fast) -> OpenRouter :free -> emergency ultra-cheap paid fallback (gemini-2.5-flash-lite)
+// Analyzer: Groq primary -> Groq llama-3.1-8b-instant (500k TPD/key!) -> OpenRouter :free -> emergency gemini-2.5-flash-lite
 async function callAnalyzerJSON(prompt) {
   const systemPrompt = 'You return strictly one valid raw JSON object only.';
   try {
-    return await callGroqJSON(prompt, systemPrompt);
+    return await callGroqJSON(prompt, systemPrompt, GROQ_MODEL);
   } catch (groqErr) {
+    // Try secondary Groq model with separate 500k TPD quota per key
+    try {
+      console.warn(`↩️ [Analyzer] ${GROQ_MODEL} exhausted; switching to Groq ${GROQ_ANALYZER_FALLBACK_MODEL}...`);
+      return await callGroqJSON(prompt, systemPrompt, GROQ_ANALYZER_FALLBACK_MODEL);
+    } catch {
+      // fall through to OpenRouter
+    }
+
     if (OPENROUTER_KEYS.length > 0) {
-      console.warn(`↩️ [Analyzer] Groq exhausted (${groqErr.message.slice(0, 90)}); falling back to OpenRouter...`);
+      console.warn(`↩️ [Analyzer] All Groq models exhausted (${groqErr.message.slice(0, 70)}); falling back to OpenRouter...`);
       try {
-        const res = await callOpenRouterJSON(prompt, systemPrompt, 1024, OPENROUTER_MODELS);
+        const res = await callOpenRouterJSON(prompt, systemPrompt, 2048, OPENROUTER_MODELS);
         return res.parsed;
       } catch {
         console.warn('↩️ [Analyzer] OpenRouter :free busy; using emergency ultra-cheap model (gemini-2.5-flash-lite)...');
-        const res = await callOpenRouterJSON(prompt, systemPrompt, 1024, ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini']);
+        const res = await callOpenRouterJSON(prompt, systemPrompt, 2048, ['google/gemini-2.5-flash-lite', 'openai/gpt-4o-mini']);
         return res.parsed;
       }
     }
@@ -580,7 +596,10 @@ async function callAnalyzerJSON(prompt) {
   }
 }
 
-// ── Jina AI Reader (with safe URL validation) ───────────────
+// ── Jina AI Reader (with safe URL validation + cookie/paywall guard) ──
+const COOKIE_PAYWALL_RE =
+  /(cookie consent|accept all cookies|manage cookies|privacy preferences|we value your privacy|enable javascript to continue|please verify you are a human|subscribe to continue reading|already a subscriber\? sign in)/i;
+
 async function fetchFullArticleText(url, fallbackSnippet) {
   if (!JINA_API_KEY || !/^https?:\/\//i.test(url)) return fallbackSnippet;
   try {
@@ -606,6 +625,13 @@ async function fetchFullArticleText(url, fallbackSnippet) {
       .replace(/Share this article/gi, '')
       .replace(/Copy link/gi, '')
       .trim();
+
+    // Reject cookie-consent / paywall walls so the LLM never writes an article about cookies!
+    if (COOKIE_PAYWALL_RE.test(text.slice(0, 1200)) && text.length < 2500) {
+      console.warn(`[Jina] Detected cookie/paywall wall for ${url}; using clean RSS snippet instead.`);
+      return fallbackSnippet;
+    }
+
     return text.length > 200 ? text.slice(0, 8000) : fallbackSnippet;
   } catch (err) {
     console.warn(`[Jina] Failed for ${url}: ${err.message}`);
@@ -732,7 +758,7 @@ LANGUAGE: ALL fields MUST be written strictly in ${langName}.
 Return ONLY a flat JSON object with these exact keys:
 {
   "headline": "High-impact clickable title without markdown asterisks",
-  "image_headline": "Ultra-punchy 5 to 9 word cover headline for the social media image card (shorter and punchier than the caption, no period at the end, no markdown)",
+  "image_headline": "STRICTLY 4 to 7 English words, complete punchy cover headline showing shock/consequence (NEVER truncated, NO trailing ellipsis, NO period, NO vague jargon). Follow these patterns: Geopolitics='TRUMP PRESSES PUTIN TO PULL BACK'; Macro/Crypto='YEN FUNDING SQUEEZE HITS BITCOIN'; Regulation/Tech='UK RULES BLOCK RETAIL DEFI ACCESS'",
   "hook": "One sharp, authoritative lead sentence summarizing the core shock",
   "summary": "2 to 3 sentence executive summary",
   "article_lead": "2 to 3 rich, detailed introductory paragraphs covering what happened, who is involved, and why it matters immediately (separate paragraphs with \\n\\n; do not repeat the headline)",
@@ -1004,6 +1030,12 @@ async function main() {
         const cleanEnHeadline = String(enEd.headline || analysis.headline || item.title).replace(/\*\*/g, '').trim();
         const cleanPtHeadline = String(ptEd.headline || cleanEnHeadline).replace(/\*\*/g, '').trim();
 
+        // Guard against cookie-consent / paywall garbage ever reaching the site or social media
+        if (/(cookie consent|not financial news|enable javascript|access denied|subscribe to read)/i.test(cleanEnHeadline)) {
+          console.warn(`🗑️ [Guard] Rejected paywall/cookie garbage article: "${cleanEnHeadline}"`);
+          continue;
+        }
+
         // 7. Generate 1080x1080 PNG card + 1080x1920 9:16 MP4 Reel & upload to Supabase Storage
         let imgPostUrl = '';
         let reelVideoUrl = '';
@@ -1017,6 +1049,8 @@ async function main() {
               pexelsApiKey: PEXELS_API_KEY,
               groqKeys: GROQ_KEYS,
               openRouterKeys: OPENROUTER_KEYS,
+              supabaseUrl: SUPABASE_URL,
+              serviceRoleKey: SUPABASE_SERVICE_ROLE_KEY,
             });
             const cardTitle = String(enEd.image_headline || cleanEnHeadline)
               .replace(/\*\*/g, '')

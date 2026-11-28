@@ -1,6 +1,7 @@
 // ============================================================
 // BBN Image Generator — scripts/image-template.mjs
 // Supports 1080x1080 (Feed/X/Threads/FB) and 1080x1920 (Reels/TikTok 9:16)
+// Safe-zone aligned so Instagram 4:5 grid NEVER crops the headline!
 // ============================================================
 
 export function buildImageHtml({ title, subline, img_url, width = 1080, height = 1080 }) {
@@ -17,13 +18,18 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
     : '';
 
   const isVertical = height > width;
-  const contentPad = isVertical ? '180px 110px 330px 70px' : '64px 60px';
-  const badgeTop = isVertical ? '150px' : '48px';
-  const sideBarBottom = isVertical ? '330px' : '64px';
-  const watermarkBottom = isVertical ? '338px' : '72px';
-  const titleBoxHeight = isVertical ? '640px' : '450px';
-  const maxFont = isVertical ? 64 : 48;
-  const minFont = isVertical ? 32 : 24;
+  // In 1080x1920 vertical Reels, Instagram crops the profile grid to center 1080x1350 (285px off top & bottom).
+  // Keeping text well inside top>=320px, bottom>=420px, left/right>=90px guarantees ZERO cropping on grid AND Reels!
+  const contentPad = isVertical ? '320px 96px 430px 96px' : '64px 72px';
+  const badgeTop = isVertical ? '310px' : '48px';
+  const badgeLeft = isVertical ? '96px' : '64px';
+  const sideBarBottom = isVertical ? '430px' : '64px';
+  const sideBarLeft = isVertical ? '96px' : '64px';
+  const watermarkBottom = isVertical ? '436px' : '72px';
+  const watermarkLeft = isVertical ? '118px' : '86px';
+  const titleBoxHeight = isVertical ? '460px' : '400px';
+  const maxFont = isVertical ? 60 : 50;
+  const minFont = isVertical ? 28 : 24;
 
   return /* html */ `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -32,7 +38,6 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
   <meta name="viewport" content="width=${width}" />
   <title>BBN Post Generator</title>
 
-  <!-- Google Font: Bebas Neue (display) + Inter (corpo) -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link
@@ -69,14 +74,16 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
       display: block;
     }
 
+    /* Strong high-contrast bottom scrim so white uppercase text always pops on mobile */
     .overlay {
       position: absolute;
       inset: 0;
       background: linear-gradient(
         to top,
-        rgba(0, 0, 0, 0.94) 0%,
-        rgba(0, 0, 0, 0.72) 48%,
-        rgba(0, 0, 0, 0.25) 100%
+        rgba(0, 0, 0, 0.96) 0%,
+        rgba(0, 0, 0, 0.88) 38%,
+        rgba(0, 0, 0, 0.45) 65%,
+        rgba(0, 0, 0, 0.22) 100%
       );
     }
 
@@ -86,7 +93,6 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
       display: flex;
       flex-direction: column;
       justify-content: flex-end;
-      max-width: none !important;
       align-items: flex-end;
       padding: ${contentPad};
     }
@@ -94,22 +100,22 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
     .badge {
       position: absolute;
       top: ${badgeTop};
-      left: 60px;
+      left: ${badgeLeft};
       display: flex;
       align-items: center;
       gap: 12px;
     }
 
     .badge-logo {
-      width: 52px;
-      height: 52px;
+      width: 50px;
+      height: 50px;
       border-radius: 50%;
       background: #F7931A;
       display: flex;
       align-items: center;
       justify-content: center;
       font-family: 'Bebas Neue', sans-serif;
-      font-size: 22px;
+      font-size: 21px;
       color: #fff;
       letter-spacing: 1px;
       flex-shrink: 0;
@@ -118,29 +124,29 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
     .badge-text {
       font-family: 'Inter', sans-serif;
       font-weight: 900;
-      font-size: 15px;
+      font-size: 14px;
       color: #fff;
       letter-spacing: 2px;
       text-transform: uppercase;
       line-height: 1.3;
       opacity: 0.95;
+      text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
     }
 
     .badge-text span {
       display: block;
       font-weight: 400;
-      font-size: 12px;
+      font-size: 11px;
       letter-spacing: 3px;
-      opacity: 0.7;
+      opacity: 0.8;
     }
 
     .title-box {
       height: ${titleBoxHeight};
-      width: 92%;
+      width: 100%;
       display: flex;
       align-items: flex-end;
       justify-content: flex-end;
-      max-width: none !important;
       overflow: hidden;
       white-space: normal;
       word-wrap: break-word;
@@ -150,18 +156,18 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
     .title-text {
       font-family: 'Bebas Neue', sans-serif;
       font-size: ${maxFont}px;
-      line-height: 1.18;
+      line-height: 1.15;
       color: #ffffff;
-      letter-spacing: -0.5px;
+      letter-spacing: 0.5px;
       text-transform: uppercase;
       text-align: right;
       text-wrap: balance;
-      text-shadow: 2px 2px 6px rgba(0, 0, 0, 0.8);
-      padding-bottom: 15px;
-      padding-right: 12px;
-      word-break: break-word;
+      text-shadow: 0 3px 12px rgba(0, 0, 0, 0.95);
+      padding-bottom: 14px;
+      padding-left: 12px;
+      padding-right: 4px;
+      word-break: normal;
       overflow-wrap: break-word;
-      hyphens: auto;
       white-space: normal;
       display: block;
       width: 100%;
@@ -170,16 +176,16 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
 
     .separator {
       width: 100%;
-      height: 3px;
+      height: 4px;
       background: #F7931A;
-      margin: 20px 0 18px;
+      margin: 16px 0 16px;
       border-radius: 2px;
     }
 
     .subline-text {
       font-family: 'Inter', sans-serif;
       font-weight: 700;
-      font-size: 22px;
+      font-size: 20px;
       color: #F7931A;
       letter-spacing: 5px;
       text-transform: uppercase;
@@ -188,10 +194,10 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
 
     .side-bar {
       position: absolute;
-      left: 60px;
+      left: ${sideBarLeft};
       bottom: ${sideBarBottom};
       width: 5px;
-      height: 80px;
+      height: 76px;
       background: #F7931A;
       border-radius: 2px;
     }
@@ -199,11 +205,11 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
     .watermark {
       position: absolute;
       bottom: ${watermarkBottom};
-      left: 82px;
+      left: ${watermarkLeft};
       font-family: 'Inter', sans-serif;
       font-size: 14px;
       font-weight: 700;
-      color: rgba(255,255,255,0.55);
+      color: rgba(255,255,255,0.65);
       letter-spacing: 2px;
       text-transform: uppercase;
     }
@@ -247,9 +253,10 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
       let currentSize = MAX_SIZE;
       text.style.fontSize = currentSize + 'px';
 
+      // Fit cleanly inside BOTH height and width with safety margin so no letter is ever clipped
       while (
-        (text.scrollHeight > box.clientHeight ||
-         text.scrollWidth  > box.clientWidth) &&
+        (text.scrollHeight > box.clientHeight - 8 ||
+         text.scrollWidth  > box.clientWidth - 4) &&
         currentSize > MIN_SIZE
       ) {
         currentSize -= 1;
@@ -258,7 +265,7 @@ export function buildImageHtml({ title, subline, img_url, width = 1080, height =
 
       const sideBar = document.querySelector('.side-bar');
       if (sideBar) {
-        sideBar.style.height = Math.min(box.clientHeight * 0.35, 200) + 'px';
+        sideBar.style.height = Math.min(text.scrollHeight * 0.45, 160) + 'px';
       }
 
       window.__BBN_READY__ = true;
